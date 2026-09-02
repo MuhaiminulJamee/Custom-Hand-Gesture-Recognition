@@ -1,0 +1,49 @@
+{
+  "artifacts": {
+    "gesture_mlp_onnx_metadata.json": {
+      "bytes": 4346,
+      "sha256": "21bfa64a36c97e1a1fa4d8ca09a13cd74d33e74dcb6a1df8481a8b05f5703e0f"
+    },
+    "gesture_mlp_production.onnx": {
+      "bytes": 78511,
+      "sha256": "e0600df46db4be4c5dbe4ae26a3b376ca8435abaf3dea18768b37ea4703ae117"
+    },
+    "gesture_mobile_runtime_config.json": {
+      "bytes": 8110,
+      "sha256": "8bab66c5483e15e4a0ad0b17288b6a1ee3a5982240831f57d98ada774f3ae4c4"
+    },
+    "hand_landmarker.task": {
+      "bytes": 7819105,
+      "sha256": "fbc2a30080c3c557093b5ddfc334698132eb341044ccee322ccf8bcf3607cde1"
+    },
+    "mediapipe_hagrid_rps_pinch15_hagrid_fist_follow_object_classification_report.csv": {
+      "bytes": 1289,
+      "sha256": "e2d628097c98bff2189f777fa9a7316da5adaf83c618bf5e2def48dc1d96c7c6"
+    },
+    "mediapipe_hagrid_rps_pinch15_hagrid_fist_follow_object_test_metrics.csv": {
+      "bytes": 469,
+      "sha256": "d5233018a1dd0bbda3a6afa56f1c33a5efc07e5b76227019fbe3f90d18385142"
+    }
+  },
+  "class_names": [
+    "call",
+    "rock",
+    "like",
+    "ok",
+    "one",
+    "one_down",
+    "one_left",
+    "one_right",
+    "palm",
+    "peace",
+    "dorsal_hand",
+    "fist",
+    "zoom_in",
+    "zoom_out",
+    "no_gesture"
+  ],
+  "created_utc": "2026-09-01T09:15:34.635106+00:00",
+  "feature_count": 76,
+  "release_fingerprint": "f0fd176ef95bd29e5d88d3bb5edcb254f0956c45f86c7ee4c0613c48e315d9b8",
+  "schema_version": 1
+}
