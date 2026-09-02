@@ -1,0 +1,32 @@
+{
+  "deferred_classes": [
+    "no_gesture"
+  ],
+  "pc_release_ready": true,
+  "qualified_utc": "2026-09-02T02:52:10.533319+00:00",
+  "schema_version": 1,
+  "selected_model": "MLP",
+  "selection_basis": {
+    "metric": "gated_macro_f1",
+    "near_tie_preference": [
+      "MLP",
+      "OnlineMLP",
+      "SVM"
+    ],
+    "near_tie_tolerance": 0.002,
+    "split": "validation",
+    "untouched_test_used_for_selection": false
+  },
+  "sources": {
+    "model_file": "mediapipe_hagrid_rps_pinch15_hagrid_fist_follow_object_models.joblib",
+    "model_sha256": "743d948ac3864b969d941022b50e775e6de711dfbccb56138bef14c2a097997d",
+    "test_cache_file": "gesture_online_untouched_test_cache.npz",
+    "test_cache_sha256": "202291e55164e4ff744626aed398749f670369ec8b136f678e3eb90db835b537",
+    "validation_cache_file": "gesture_online_validation_cache.npz",
+    "validation_cache_sha256": "d6344055cb80a9b4da030c180234089fe239c0576f58b284ba2599367f6f209e"
+  },
+  "thresholds": {
+    "minimum_macro_f1": 0.9,
+    "minimum_per_class_f1": 0.8
+  }
+}

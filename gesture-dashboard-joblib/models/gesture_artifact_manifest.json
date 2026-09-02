@@ -1,0 +1,65 @@
+{
+  "artifacts": {
+    "gesture_joblib_runtime_config.json": {
+      "bytes": 6824,
+      "sha256": "315155bca666fe24cf6ab5b6a2ba3fc32242cc1549f375e34aca42c9c1e5c4dd"
+    },
+    "gesture_online_replay_cache.npz": {
+      "bytes": 502943,
+      "sha256": "fe9136f594319f0fd372f9da13552ed7bbf1d9cb01aea32184200bbc6ed16f3c"
+    },
+    "gesture_online_state.joblib": {
+      "bytes": 221398,
+      "sha256": "aad3221d06a84be9a15bbe45743182ee576f939feca036fa3471806d42835d8f"
+    },
+    "gesture_online_untouched_test_cache.npz": {
+      "bytes": 1178235,
+      "sha256": "202291e55164e4ff744626aed398749f670369ec8b136f678e3eb90db835b537"
+    },
+    "gesture_online_validation_cache.npz": {
+      "bytes": 1150881,
+      "sha256": "d6344055cb80a9b4da030c180234089fe239c0576f58b284ba2599367f6f209e"
+    },
+    "gesture_primary_model.joblib": {
+      "bytes": 242365,
+      "sha256": "9ae3223ad2b6138cf180e7d3b7c99ae14f31332583c76b69a576c9fe8f30cca9"
+    },
+    "gesture_production_qualification.json": {
+      "bytes": 5626,
+      "sha256": "c385163e6823a6efd90d3a8272e5fdd3c1879fadea9c5bd21ab29f8d5633bf07"
+    },
+    "gesture_production_selection.json": {
+      "bytes": 1068,
+      "sha256": "5cc6cf04f2f96b103d3cb13121e7d1b35f0e83650ca165c11b479747c4f69216"
+    },
+    "hand_landmarker.task": {
+      "bytes": 7819105,
+      "sha256": "fbc2a30080c3c557093b5ddfc334698132eb341044ccee322ccf8bcf3607cde1"
+    },
+    "mediapipe_hagrid_rps_pinch15_hagrid_fist_follow_object_models.joblib": {
+      "bytes": 2033396,
+      "sha256": "743d948ac3864b969d941022b50e775e6de711dfbccb56138bef14c2a097997d"
+    }
+  },
+  "class_names": [
+    "call",
+    "rock",
+    "like",
+    "ok",
+    "one",
+    "one_down",
+    "one_left",
+    "one_right",
+    "palm",
+    "peace",
+    "dorsal_hand",
+    "fist",
+    "zoom_in",
+    "zoom_out",
+    "no_gesture"
+  ],
+  "created_utc": "2026-09-02T02:52:10.829334+00:00",
+  "feature_count": 76,
+  "release_fingerprint": "614176811c9f606e347b26747e7e68b349ddefde9ce62565290f439fcc83d62c",
+  "schema_version": 1
+}

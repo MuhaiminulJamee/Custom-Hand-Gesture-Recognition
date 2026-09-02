@@ -1,0 +1,180 @@
+{
+  "accuracy": 0.9550600343053173,
+  "balanced_accuracy": 0.9430286687522128,
+  "candidate_results": {
+    "MLP": {
+      "accuracy": 0.9550561797752809,
+      "balanced_accuracy": 0.9458456378394872,
+      "failing_gated_classes": [],
+      "gated_macro_f1": 0.9559461600802861,
+      "gated_minimum_per_class_f1": 0.8843537414965986,
+      "model": "MLP",
+      "passed": true
+    },
+    "OnlineMLP": {
+      "accuracy": 0.9339887640449438,
+      "balanced_accuracy": 0.9216736359533806,
+      "failing_gated_classes": [
+        "zoom_out"
+      ],
+      "gated_macro_f1": 0.9397471348989457,
+      "gated_minimum_per_class_f1": 0.7916666666666666,
+      "model": "OnlineMLP",
+      "passed": false
+    },
+    "SVM": {
+      "accuracy": 0.9557584269662921,
+      "balanced_accuracy": 0.9471087301277783,
+      "failing_gated_classes": [],
+      "gated_macro_f1": 0.9567461237631079,
+      "gated_minimum_per_class_f1": 0.8846153846153846,
+      "model": "SVM",
+      "passed": true
+    }
+  },
+  "class_metrics": {
+    "call": {
+      "f1": 0.9629629629629629,
+      "precision": 0.9662162162162162,
+      "recall": 0.959731543624161,
+      "release_gate_included": true,
+      "support": 149
+    },
+    "dorsal_hand": {
+      "f1": 0.9941792782305006,
+      "precision": 0.9884259259259259,
+      "recall": 1.0,
+      "release_gate_included": true,
+      "support": 427
+    },
+    "fist": {
+      "f1": 0.9085173501577287,
+      "precision": 0.9113924050632911,
+      "recall": 0.9056603773584906,
+      "release_gate_included": true,
+      "support": 159
+    },
+    "like": {
+      "f1": 0.9454545454545454,
+      "precision": 0.9420289855072463,
+      "recall": 0.948905109489051,
+      "release_gate_included": true,
+      "support": 137
+    },
+    "no_gesture": {
+      "f1": 0.8711656441717791,
+      "precision": 0.8819875776397516,
+      "recall": 0.8606060606060606,
+      "release_gate_included": false,
+      "support": 165
+    },
+    "ok": {
+      "f1": 0.9696969696969697,
+      "precision": 0.96,
+      "recall": 0.9795918367346939,
+      "release_gate_included": true,
+      "support": 147
+    },
+    "one": {
+      "f1": 0.9466950959488273,
+      "precision": 0.925,
+      "recall": 0.9694323144104804,
+      "release_gate_included": true,
+      "support": 229
+    },
+    "one_down": {
+      "f1": 0.9779735682819384,
+      "precision": 0.9866666666666667,
+      "recall": 0.9694323144104804,
+      "release_gate_included": true,
+      "support": 229
+    },
+    "one_left": {
+      "f1": 0.9691629955947136,
+      "precision": 0.9777777777777777,
+      "recall": 0.9606986899563319,
+      "release_gate_included": true,
+      "support": 229
+    },
+    "one_right": {
+      "f1": 0.9605263157894737,
+      "precision": 0.9647577092511013,
+      "recall": 0.9563318777292577,
+      "release_gate_included": true,
+      "support": 229
+    },
+    "palm": {
+      "f1": 0.9858156028368794,
+      "precision": 0.9928571428571429,
+      "recall": 0.9788732394366197,
+      "release_gate_included": true,
+      "support": 142
+    },
+    "peace": {
+      "f1": 0.9496402877697842,
+      "precision": 0.9777777777777777,
+      "recall": 0.9230769230769231,
+      "release_gate_included": true,
+      "support": 143
+    },
+    "rock": {
+      "f1": 0.9547738693467337,
+      "precision": 0.9375,
+      "recall": 0.9726962457337884,
+      "release_gate_included": true,
+      "support": 293
+    },
+    "zoom_in": {
+      "f1": 0.9461077844311377,
+      "precision": 0.9461077844311377,
+      "recall": 0.9461077844311377,
+      "release_gate_included": true,
+      "support": 167
+    },
+    "zoom_out": {
+      "f1": 0.8444444444444444,
+      "precision": 0.8769230769230769,
+      "recall": 0.8142857142857143,
+      "release_gate_included": true,
+      "support": 70
+    }
+  },
+  "created_utc": "2026-09-02T02:52:10.533319+00:00",
+  "current": true,
+  "deferred_classes": [
+    "no_gesture"
+  ],
+  "failing_gated_classes": [],
+  "gated_macro_f1": 0.9511393622104742,
+  "gated_minimum_per_class_f1": 0.8444444444444444,
+  "pc_release_ready": true,
+  "report": "C:\\Users\\Admin\\Documents\\ChatGPT\\Training Gesture Recognition for static poses\\gesture-dashboard-joblib\\models\\gesture_production_qualification.json",
+  "runtime_format": "Joblib",
+  "samples": 2915,
+  "schema_version": 1,
+  "selected_model": "MLP",
+  "selection": "C:\\Users\\Admin\\Documents\\ChatGPT\\Training Gesture Recognition for static poses\\gesture-dashboard-joblib\\models\\gesture_production_selection.json",
+  "selection_validation_result": {
+    "accuracy": 0.9550561797752809,
+    "balanced_accuracy": 0.9458456378394872,
+    "failing_gated_classes": [],
+    "gated_macro_f1": 0.9559461600802861,
+    "gated_minimum_per_class_f1": 0.8843537414965986,
+    "model": "MLP",
+    "passed": true
+  },
+  "sources": {
+    "model_file": "mediapipe_hagrid_rps_pinch15_hagrid_fist_follow_object_models.joblib",
+    "model_sha256": "743d948ac3864b969d941022b50e775e6de711dfbccb56138bef14c2a097997d",
+    "test_cache_file": "gesture_online_untouched_test_cache.npz",
+    "test_cache_sha256": "202291e55164e4ff744626aed398749f670369ec8b136f678e3eb90db835b537",
+    "validation_cache_file": "gesture_online_validation_cache.npz",
+    "validation_cache_sha256": "d6344055cb80a9b4da030c180234089fe239c0576f58b284ba2599367f6f209e"
+  },
+  "status": "passed",
+  "thresholds": {
+    "minimum_macro_f1": 0.9,
+    "minimum_per_class_f1": 0.8
+  },
+  "validation_samples": 2848
+}
