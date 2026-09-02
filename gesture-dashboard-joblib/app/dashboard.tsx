@@ -1,5 +1,8 @@
 'use client';
 
+/* Local blob image previews must use native img elements. */
+/* eslint-disable @next/next/no-img-element */
+
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
 
 const API_URL = process.env.NEXT_PUBLIC_GESTURE_API_URL ?? 'http://127.0.0.1:8000';
@@ -24,6 +27,23 @@ const DEFAULT_ACTIONS: Record<string, string> = {
   zoom_in: 'Zoom In',
   zoom_out: 'Zoom Out',
   no_gesture: 'No Gesture',
+};
+const DEMO_COMMANDS: Record<string, string> = {
+  call: 'DETECT_FACE',
+  rock: 'PAUSE_VIDEO',
+  like: 'TOGGLE_PLAYBACK',
+  ok: 'START_RECORDING',
+  one: 'MOVE_UP',
+  one_down: 'MOVE_DOWN',
+  one_left: 'MOVE_LEFT',
+  one_right: 'MOVE_RIGHT',
+  palm: 'OPEN_OR_RELEASE',
+  peace: 'END_RECORDING',
+  dorsal_hand: 'RETURN_HOME',
+  fist: 'GRAB_OBJECT',
+  zoom_in: 'ZOOM_IN',
+  zoom_out: 'ZOOM_OUT',
+  no_gesture: 'NONE',
 };
 const HAND_CONNECTIONS = [
   [0, 1], [1, 2], [2, 3], [3, 4], [0, 5], [5, 6], [6, 7], [7, 8],
@@ -174,6 +194,23 @@ type Prediction = {
 };
 type MetricResponse = { files: string[]; rows: Record<string, Record<string, string>[]> };
 type ActionEvent = { action: string; prediction: string; confidence: number; session_id?: string };
+type DemoEvent = {
+  command: string;
+  gesture: string;
+  detail: string;
+  at: string;
+  status: 'performed' | 'ignored' | 'failed';
+};
+type ActionToast = { label: string; gesture: string; status: 'performed' | 'failed' };
+type DemoMediaAsset = {
+  url: string;
+  name: string;
+  kind: 'video' | 'image';
+  duration?: number;
+  width?: number;
+  height?: number;
+};
+type VideoTransform = { x: number; y: number; scale: number };
 type LearningMode = 'audit' | 'safe' | 'force';
 
 function humanize(value?: string) {
@@ -203,8 +240,21 @@ export default function Dashboard() {
   const [feedbackMessage, setFeedbackMessage] = useState('');
   const [uploading, setUploading] = useState(false);
   const [snapshotReady, setSnapshotReady] = useState(false);
+  const [demoVideo, setDemoVideo] = useState<DemoMediaAsset | null>(null);
+  const [demoVideoMessage, setDemoVideoMessage] = useState('Upload a video (up to 60 seconds) or an image to enable the action demo.');
+  const [demoTransform, setDemoTransform] = useState<VideoTransform>({ x: 0, y: 0, scale: 1 });
+  const [demoEvents, setDemoEvents] = useState<DemoEvent[]>([]);
+  const [demoRecording, setDemoRecording] = useState(false);
+  const [recordingDownloadUrl, setRecordingDownloadUrl] = useState<string | null>(null);
+  const [faceScanActive, setFaceScanActive] = useState(false);
+  const [objectGrabbed, setObjectGrabbed] = useState(false);
+  const [actionToast, setActionToast] = useState<ActionToast | null>(null);
+  const [imagePreviewActive, setImagePreviewActive] = useState(true);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const demoVideoRef = useRef<HTMLVideoElement | null>(null);
+  const demoImageRef = useRef<HTMLImageElement | null>(null);
+  const demoRecordingCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const captureCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const landmarkCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -218,6 +268,17 @@ export default function Dashboard() {
   const videoFrameCallbackRef = useRef<number | null>(null);
   const captureAndSendRef = useRef<() => void>(() => undefined);
   const stopCameraRef = useRef<(preservePrediction?: boolean) => void>(() => undefined);
+  const executeDemoPredictionRef = useRef<(message: Prediction) => void>(() => undefined);
+  const demoVideoAssetRef = useRef<DemoMediaAsset | null>(null);
+  const demoTransformRef = useRef<VideoTransform>({ x: 0, y: 0, scale: 1 });
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordingChunksRef = useRef<Blob[]>([]);
+  const lastExecutedGestureRef = useRef<string | null>(null);
+  const gestureReleaseFramesRef = useRef(0);
+  const faceScanTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const actionToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const recordingFrameTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const recordingStreamRef = useRef<MediaStream | null>(null);
 
   const targetFps = health?.config.target_fps ?? 10;
   const frameIntervalMs = health?.config.frame_interval_ms ?? 100;
@@ -274,9 +335,21 @@ export default function Dashboard() {
   useEffect(() => () => {
     if (captureTimerRef.current) clearTimeout(captureTimerRef.current);
     if (successTimerRef.current) clearTimeout(successTimerRef.current);
+    if (faceScanTimerRef.current) clearTimeout(faceScanTimerRef.current);
+    if (actionToastTimerRef.current) clearTimeout(actionToastTimerRef.current);
+    if (recordingFrameTimerRef.current) clearInterval(recordingFrameTimerRef.current);
+    if (mediaRecorderRef.current?.state !== 'inactive') mediaRecorderRef.current?.stop();
+    recordingStreamRef.current?.getTracks().forEach((track) => track.stop());
     socketRef.current?.close();
     streamRef.current?.getTracks().forEach((track) => track.stop());
+    if (demoVideoAssetRef.current) URL.revokeObjectURL(demoVideoAssetRef.current.url);
   }, []);
+
+  useEffect(() => { demoVideoAssetRef.current = demoVideo; }, [demoVideo]);
+  useEffect(() => { demoTransformRef.current = demoTransform; }, [demoTransform]);
+  useEffect(() => () => {
+    if (recordingDownloadUrl) URL.revokeObjectURL(recordingDownloadUrl);
+  }, [recordingDownloadUrl]);
 
   const probabilityRows = useMemo(() => {
     const values = prediction.probabilities ?? Object.fromEntries(classNames.map((name) => [name, 0]));
@@ -323,11 +396,26 @@ export default function Dashboard() {
     captureTimerRef.current = setTimeout(() => captureAndSendRef.current(), Math.max(0, delayMs));
   };
 
+  const sendCanvasFrame = (canvas: HTMLCanvasElement, socket: WebSocket) => {
+    lastSnapshotRef.current = canvas.toDataURL('image/jpeg', 0.88);
+    setSnapshotReady(true);
+    canvas.toBlob((blob) => {
+      if (!blob || socket.readyState !== WebSocket.OPEN) {
+        inFlightRef.current = false;
+        scheduleCapture(frameIntervalMs);
+        return;
+      }
+      lastSentAtRef.current = performance.now();
+      socket.send(blob);
+    }, 'image/jpeg', 0.88);
+  };
+
   const captureAndSend = () => {
-    const video = videoRef.current;
     const canvas = captureCanvasRef.current;
     const socket = socketRef.current;
-    if (!video || !canvas || !socket || socket.readyState !== WebSocket.OPEN || video.readyState < 2) return;
+    if (!canvas || !socket || socket.readyState !== WebSocket.OPEN) return;
+    const video = videoRef.current;
+    if (!video || video.readyState < 2) return;
     if (inFlightRef.current || socket.bufferedAmount > 0) return;
     const side = Math.min(video.videoWidth, video.videoHeight) * (health?.config.roi_size_ratio ?? 0.92);
     const sourceX = (video.videoWidth - side) / 2;
@@ -341,17 +429,8 @@ export default function Dashboard() {
     context.scale(-1, 1);
     context.drawImage(video, sourceX, sourceY, side, side, 0, 0, canvas.width, canvas.height);
     context.restore();
-    lastSnapshotRef.current = canvas.toDataURL('image/jpeg', 0.88);
-    setSnapshotReady(true);
-    canvas.toBlob((blob) => {
-      if (!blob || socket.readyState !== WebSocket.OPEN || inFlightRef.current) {
-        scheduleCapture(frameIntervalMs);
-        return;
-      }
-      inFlightRef.current = true;
-      lastSentAtRef.current = performance.now();
-      socket.send(blob);
-    }, 'image/jpeg', 0.88);
+    inFlightRef.current = true;
+    sendCanvasFrame(canvas, socket);
   };
 
   useEffect(() => {
@@ -413,7 +492,10 @@ export default function Dashboard() {
     if (cameraActive) return;
     setSuccessVisible(false);
     setConnection('connecting');
-    setPrediction({ status: 'starting', message: 'Requesting camera access…' });
+    setPrediction({
+      status: 'starting',
+      message: 'Requesting browser webcam access…',
+    });
     try {
       let stream: MediaStream;
       try {
@@ -455,6 +537,7 @@ export default function Dashboard() {
           inFlightRef.current = false;
           setPrediction(message);
           setFollowActive(Boolean(message.follow_object?.active));
+          executeDemoPredictionRef.current(message);
           if (message.runtime_action && message.runtime_action !== 'Wait / No Action') {
             setActions((current) => [{
               action: message.runtime_action,
@@ -518,6 +601,363 @@ export default function Dashboard() {
     const model = event.target.value;
     setSelectedModel(model);
     socketRef.current?.send(JSON.stringify({ type: 'select_model', model }));
+  };
+
+  const addDemoEvent = (
+    command: string,
+    gesture: string,
+    detail: string,
+    status: DemoEvent['status'] = 'performed',
+    toastLabel = command.replaceAll('_', ' '),
+  ) => {
+    const event: DemoEvent = {
+      command,
+      gesture,
+      detail,
+      status,
+      at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+    };
+    setDemoEvents((current) => [event, ...current].slice(0, 20));
+    setDemoVideoMessage(detail);
+    if (status !== 'ignored') {
+      setActionToast({ label: status === 'failed' ? 'ACTION FAILED' : toastLabel, gesture, status });
+      if (actionToastTimerRef.current) clearTimeout(actionToastTimerRef.current);
+      actionToastTimerRef.current = setTimeout(() => setActionToast(null), 1800);
+    }
+  };
+
+  const updateDemoTransform = (update: (current: VideoTransform) => VideoTransform) => {
+    const next = update(demoTransformRef.current);
+    demoTransformRef.current = next;
+    setDemoTransform(next);
+  };
+
+  const drawDemoRecordingFrame = () => {
+    const canvas = demoRecordingCanvasRef.current;
+    const asset = demoVideoAssetRef.current;
+    const source = asset?.kind === 'video' ? demoVideoRef.current : demoImageRef.current;
+    if (!canvas || !asset || !source) return;
+    const sourceWidth = asset.kind === 'video'
+      ? (source as HTMLVideoElement).videoWidth
+      : (source as HTMLImageElement).naturalWidth;
+    const sourceHeight = asset.kind === 'video'
+      ? (source as HTMLVideoElement).videoHeight
+      : (source as HTMLImageElement).naturalHeight;
+    if (!sourceWidth || !sourceHeight) return;
+    const context = canvas.getContext('2d');
+    if (!context) return;
+    const { x, y, scale } = demoTransformRef.current;
+    context.fillStyle = '#060b13';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    const fit = Math.min((canvas.width * 0.82) / sourceWidth, (canvas.height * 0.82) / sourceHeight);
+    const drawWidth = sourceWidth * fit;
+    const drawHeight = sourceHeight * fit;
+    context.save();
+    context.translate(
+      canvas.width / 2 + (x / 100) * drawWidth,
+      canvas.height / 2 + (y / 100) * drawHeight,
+    );
+    context.scale(scale, scale);
+    context.drawImage(source, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
+    context.restore();
+    context.strokeStyle = 'rgba(73, 217, 209, .72)';
+    context.lineWidth = 3;
+    context.strokeRect(canvas.width * 0.035, canvas.height * 0.055, canvas.width * 0.93, canvas.height * 0.89);
+  };
+
+  const finishRecordingResources = () => {
+    if (recordingFrameTimerRef.current) clearInterval(recordingFrameTimerRef.current);
+    recordingFrameTimerRef.current = null;
+    recordingStreamRef.current?.getTracks().forEach((track) => track.stop());
+    recordingStreamRef.current = null;
+  };
+
+  const startDemoRecording = async (): Promise<string> => {
+    const asset = demoVideoAssetRef.current;
+    const canvas = demoRecordingCanvasRef.current as (HTMLCanvasElement & {
+      captureStream?: (frameRate?: number) => MediaStream;
+    }) | null;
+    if (!asset || !canvas) throw new Error('Upload a demonstration video or image first.');
+    if (mediaRecorderRef.current?.state === 'recording') return 'Recording is already active.';
+    if (!canvas.captureStream || typeof MediaRecorder === 'undefined') {
+      throw new Error('Demo recording requires current Chrome or Edge on Windows.');
+    }
+    setRecordingDownloadUrl((current) => {
+      if (current) URL.revokeObjectURL(current);
+      return null;
+    });
+    if (asset.kind === 'video') await demoVideoRef.current?.play();
+    canvas.width = 1280;
+    canvas.height = 720;
+    drawDemoRecordingFrame();
+    if (recordingFrameTimerRef.current) clearInterval(recordingFrameTimerRef.current);
+    recordingFrameTimerRef.current = setInterval(drawDemoRecordingFrame, 100);
+    const stream = canvas.captureStream(10);
+    recordingStreamRef.current = stream;
+    const mimeCandidates = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
+    const mimeType = mimeCandidates.find((candidate) => MediaRecorder.isTypeSupported(candidate));
+    const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+    recordingChunksRef.current = [];
+    recorder.ondataavailable = (event) => {
+      if (event.data.size) recordingChunksRef.current.push(event.data);
+    };
+    recorder.onstop = () => {
+      const blob = new Blob(recordingChunksRef.current, { type: recorder.mimeType || 'video/webm' });
+      if (blob.size) {
+        const url = URL.createObjectURL(blob);
+        setRecordingDownloadUrl((current) => {
+          if (current) URL.revokeObjectURL(current);
+          return url;
+        });
+      }
+      finishRecordingResources();
+      setDemoRecording(false);
+      mediaRecorderRef.current = null;
+    };
+    recorder.onerror = () => {
+      finishRecordingResources();
+      setDemoRecording(false);
+      setDemoVideoMessage('The browser could not finish the demonstration recording.');
+    };
+    mediaRecorderRef.current = recorder;
+    recorder.start(500);
+    setDemoRecording(true);
+    return `Recording started for the uploaded ${asset.kind}. Show Peace to finish and create the downloadable WebM clip.`;
+  };
+
+  const stopDemoRecording = (): string => {
+    const recorder = mediaRecorderRef.current;
+    if (!recorder || recorder.state === 'inactive') return 'No demonstration recording is active.';
+    recorder.stop();
+    return 'Recording ended. The download will appear when the browser finishes the file.';
+  };
+
+  const performDemoCommand = async (command: string, gesture: string) => {
+    const asset = demoVideoAssetRef.current;
+    const targetVideo = demoVideoRef.current;
+    const targetImage = demoImageRef.current;
+    if (!asset || (asset.kind === 'video' ? !targetVideo : !targetImage)) return;
+    try {
+      let detail = '';
+      let toastLabel = command.replaceAll('_', ' ');
+      switch (command) {
+        case 'DETECT_FACE':
+          setFaceScanActive(true);
+          if (faceScanTimerRef.current) clearTimeout(faceScanTimerRef.current);
+          faceScanTimerRef.current = setTimeout(() => setFaceScanActive(false), 2500);
+          detail = 'Face-target request performed: the target focus marker is active.';
+          toastLabel = 'FACE TARGET ACTIVE';
+          break;
+        case 'PAUSE_VIDEO':
+          if (asset.kind === 'video') {
+            targetVideo?.pause();
+            detail = 'Uploaded video paused.';
+            toastLabel = 'VIDEO PAUSED';
+          } else {
+            setImagePreviewActive(false);
+            detail = 'Uploaded image preview paused and dimmed.';
+            toastLabel = 'IMAGE PAUSED';
+          }
+          break;
+        case 'TOGGLE_PLAYBACK':
+          if (asset.kind === 'image') {
+            const next = !imagePreviewActive;
+            setImagePreviewActive(next);
+            detail = next ? 'Uploaded image preview continued.' : 'Uploaded image preview stopped temporarily.';
+            toastLabel = next ? 'IMAGE CONTINUED' : 'IMAGE STOPPED';
+          } else if (targetVideo?.paused) {
+            await targetVideo.play();
+            detail = 'Uploaded video continued.';
+            toastLabel = 'VIDEO CONTINUED';
+          } else {
+            targetVideo?.pause();
+            detail = 'Uploaded video stopped temporarily.';
+            toastLabel = 'VIDEO PAUSED';
+          }
+          break;
+        case 'START_RECORDING':
+          detail = await startDemoRecording();
+          toastLabel = detail.startsWith('Recording is') ? 'RECORDING ALREADY ACTIVE' : 'RECORDING STARTED';
+          break;
+        case 'END_RECORDING':
+          detail = stopDemoRecording();
+          toastLabel = detail.startsWith('No demonstration') ? 'NO RECORDING ACTIVE' : 'RECORDING ENDED';
+          break;
+        case 'MOVE_UP':
+          updateDemoTransform((current) => ({ ...current, y: Math.max(-24, current.y - 8) }));
+          detail = 'Video target moved up.';
+          toastLabel = 'MOVED UP';
+          break;
+        case 'MOVE_DOWN':
+          updateDemoTransform((current) => ({ ...current, y: Math.min(24, current.y + 8) }));
+          detail = 'Video target moved down.';
+          toastLabel = 'MOVED DOWN';
+          break;
+        case 'MOVE_LEFT':
+          updateDemoTransform((current) => ({ ...current, x: Math.max(-24, current.x - 8) }));
+          detail = 'Video target moved left.';
+          toastLabel = 'MOVED LEFT';
+          break;
+        case 'MOVE_RIGHT':
+          updateDemoTransform((current) => ({ ...current, x: Math.min(24, current.x + 8) }));
+          detail = 'Video target moved right.';
+          toastLabel = 'MOVED RIGHT';
+          break;
+        case 'OPEN_OR_RELEASE':
+          if (objectGrabbed) {
+            setObjectGrabbed(false);
+            detail = 'The followed object was released.';
+            toastLabel = 'OBJECT RELEASED';
+          } else if (asset.kind === 'image') {
+            setImagePreviewActive(true);
+            detail = 'Open Palm performed: uploaded image preview is active.';
+            toastLabel = 'IMAGE OPENED';
+          } else {
+            await targetVideo?.play();
+            detail = 'Open Palm performed: uploaded video is playing.';
+            toastLabel = 'VIDEO PLAYING';
+          }
+          break;
+        case 'RETURN_HOME':
+          updateDemoTransform(() => ({ x: 0, y: 0, scale: 1 }));
+          setObjectGrabbed(false);
+          setImagePreviewActive(true);
+          detail = 'Video returned to its main position and original zoom.';
+          toastLabel = 'RETURNED TO MAIN POSITION';
+          break;
+        case 'GRAB_OBJECT':
+          setObjectGrabbed(true);
+          detail = 'Object grabbed. Directional gestures now visibly reposition the target.';
+          toastLabel = 'OBJECT GRABBED';
+          break;
+        case 'ZOOM_IN':
+          updateDemoTransform((current) => ({ ...current, scale: Math.min(2, Number((current.scale + 0.2).toFixed(2))) }));
+          detail = 'Video zoomed in.';
+          toastLabel = 'ZOOMED IN';
+          break;
+        case 'ZOOM_OUT':
+          updateDemoTransform((current) => ({ ...current, scale: Math.max(0.7, Number((current.scale - 0.2).toFixed(2))) }));
+          detail = 'Video zoomed out.';
+          toastLabel = 'ZOOMED OUT';
+          break;
+        case 'FOLLOW_OBJECT_COMPLETE':
+          setObjectGrabbed(false);
+          detail = 'Palm-Fist-Palm Follow Object procedure completed successfully.';
+          toastLabel = 'FOLLOW OBJECT COMPLETED';
+          break;
+        default:
+          return;
+      }
+      addDemoEvent(command, gesture, detail, 'performed', toastLabel);
+    } catch (error) {
+      addDemoEvent(
+        command,
+        gesture,
+        error instanceof Error ? error.message : 'The action could not be performed.',
+        'failed',
+        'ACTION FAILED',
+      );
+    }
+  };
+
+  const executeDemoPrediction = (message: Prediction) => {
+    const gesture = message.runtime_prediction;
+    if (!gesture || !demoVideoAssetRef.current) return;
+    const lastGesture = lastExecutedGestureRef.current;
+    if (gesture === 'no_gesture') {
+      lastExecutedGestureRef.current = null;
+      gestureReleaseFramesRef.current = 0;
+    } else if (lastGesture && message.raw_prediction && message.raw_prediction !== lastGesture) {
+      gestureReleaseFramesRef.current += 1;
+      if (gestureReleaseFramesRef.current >= 2) {
+        lastExecutedGestureRef.current = null;
+        gestureReleaseFramesRef.current = 0;
+      }
+    } else if (gesture === lastGesture) {
+      gestureReleaseFramesRef.current = 0;
+    }
+    const action = message.runtime_action;
+    if (!action || action === 'Wait / No Action' || action === 'No Gesture') return;
+    const command = action === 'Follow Object' ? 'FOLLOW_OBJECT_COMPLETE' : DEMO_COMMANDS[gesture];
+    if (!command || command === 'NONE' || lastExecutedGestureRef.current === gesture) return;
+    lastExecutedGestureRef.current = gesture;
+    gestureReleaseFramesRef.current = 0;
+    void performDemoCommand(command, gesture);
+  };
+
+  useEffect(() => { executeDemoPredictionRef.current = executeDemoPrediction; });
+
+  const uploadDemoMedia = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    const kind = file.type.startsWith('video/') ? 'video' : file.type.startsWith('image/') ? 'image' : null;
+    if (!kind) {
+      setDemoVideoMessage('Choose a valid video or image file.');
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    try {
+      let asset: DemoMediaAsset;
+      if (kind === 'video') {
+        const duration = await new Promise<number>((resolve, reject) => {
+          const probe = document.createElement('video');
+          probe.preload = 'metadata';
+          probe.onloadedmetadata = () => resolve(probe.duration);
+          probe.onerror = () => reject(new Error('The browser could not read this video.'));
+          probe.src = url;
+        });
+        if (!Number.isFinite(duration) || duration <= 0 || duration > 60) {
+          throw new Error('The demonstration video must be 60 seconds or shorter.');
+        }
+        asset = { url, name: file.name, kind, duration };
+      } else {
+        const dimensions = await new Promise<{ width: number; height: number }>((resolve, reject) => {
+          const probe = new Image();
+          probe.onload = () => resolve({ width: probe.naturalWidth, height: probe.naturalHeight });
+          probe.onerror = () => reject(new Error('The browser could not read this image.'));
+          probe.src = url;
+        });
+        asset = { url, name: file.name, kind, ...dimensions };
+      }
+      if (demoVideoAssetRef.current) URL.revokeObjectURL(demoVideoAssetRef.current.url);
+      demoVideoAssetRef.current = asset;
+      setDemoVideo(asset);
+      updateDemoTransform(() => ({ x: 0, y: 0, scale: 1 }));
+      setDemoEvents([]);
+      setActionToast(null);
+      setObjectGrabbed(false);
+      setImagePreviewActive(true);
+      setRecordingDownloadUrl((current) => {
+        if (current) URL.revokeObjectURL(current);
+        return null;
+      });
+      lastExecutedGestureRef.current = null;
+      setDemoVideoMessage(`${kind === 'video' ? 'Video' : 'Image'} ready. Start the webcam and hold a gesture until the stable action fires.`);
+      if (kind === 'video') setTimeout(() => { void demoVideoRef.current?.play().catch(() => undefined); }, 0);
+    } catch (error) {
+      URL.revokeObjectURL(url);
+      setDemoVideoMessage(error instanceof Error ? error.message : 'The media file could not be loaded.');
+    }
+  };
+
+  const removeDemoVideo = () => {
+    if (demoRecording) return;
+    if (demoVideoAssetRef.current) URL.revokeObjectURL(demoVideoAssetRef.current.url);
+    demoVideoAssetRef.current = null;
+    setDemoVideo(null);
+    setDemoEvents([]);
+    setActionToast(null);
+    setFaceScanActive(false);
+    setObjectGrabbed(false);
+    setImagePreviewActive(true);
+    setRecordingDownloadUrl((current) => {
+      if (current) URL.revokeObjectURL(current);
+      return null;
+    });
+    updateDemoTransform(() => ({ x: 0, y: 0, scale: 1 }));
+    setDemoVideoMessage('Upload a video (up to 60 seconds) or an image to enable the action demo.');
+    lastExecutedGestureRef.current = null;
   };
 
   const predictUploadedImage = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -595,7 +1035,7 @@ export default function Dashboard() {
       <header className="topbar">
         <div className="brand-lockup">
           <span className="brand-mark">G</span>
-          <div><p className="eyebrow">WINDOWS · LOCAL INFERENCE</p><h1>Gesture Control Lab</h1></div>
+          <div><p className="eyebrow">WINDOWS · JOBLIB RUNTIME</p><h1>Gesture Control Lab</h1></div>
         </div>
         <div className="topbar-status">
           <span className={`status-dot ${connection === 'online' ? 'is-online' : ''}`} />
@@ -622,20 +1062,34 @@ export default function Dashboard() {
           <div className="section-heading">
             <div><p className="eyebrow">REAL-TIME RECOGNITION</p><h2>10 FPS live qualification</h2></div>
             <div className="heading-actions">
+              <label className="primary-button file-button demo-upload-button">
+                {demoVideo ? 'Replace demo media' : 'Upload video / image'}
+                <input type="file" accept="video/*,image/*" onChange={uploadDemoMedia} disabled={demoRecording} />
+              </label>
+              {demoVideo && <button className="secondary-button" type="button" onClick={removeDemoVideo} disabled={demoRecording}>Remove media</button>}
               <label className="secondary-button file-button">
-                {uploading ? 'Processing…' : 'Test image'}
+                {uploading ? 'Processing…' : 'Classify image'}
                 <input type="file" accept="image/*" onChange={predictUploadedImage} disabled={uploading || !serverReady} />
               </label>
               <button className="secondary-button" type="button" onClick={resetSession}>Reset</button>
               <button className="primary-button" type="button" onClick={toggleCamera} disabled={!serverReady}>
-                {cameraActive ? 'Stop camera' : 'Start 10 FPS test'}
+                {cameraActive ? 'Stop camera' : 'Start webcam'}
               </button>
             </div>
           </div>
 
+          <div className={`demo-status-banner ${demoVideo ? 'ready' : ''}`}>
+            <div><strong>{demoVideo ? 'ACTION DEMO READY' : 'UPLOAD MEDIA DEMO'}</strong>
+              <span>{demoVideo
+                ? `${demoVideo.name} · ${demoVideo.kind === 'video' ? `${demoVideo.duration?.toFixed(1)} seconds` : `${demoVideo.width} × ${demoVideo.height} image`} · processed locally`
+                : 'Use a local video of 60 seconds or less, or an image.'}</span>
+            </div>
+            <p>{demoVideoMessage}</p>
+          </div>
+
           {!serverReady && <div className="setup-banner">
             <strong>Model setup required.</strong>
-            <span>The UI and MediaPipe runtime are ready, but your trained v18_17 artifacts are not in the models folder.</span>
+            <span>The UI is ready, but the signed Joblib model bundle, runtime configuration, or MediaPipe detector is missing or invalid.</span>
             <button type="button" onClick={() => setActiveTab('setup')}>Open setup</button>
           </div>}
 
@@ -651,12 +1105,47 @@ export default function Dashboard() {
           <div className="dashboard-grid">
             <article className="camera-card panel">
               <div className="panel-header">
-                <div><span className={`live-dot ${cameraActive ? 'is-online' : ''}`} /> CAMERA PREVIEW</div>
-                <span>Mirror corrected · central 92% ROI</span>
+                <div><span className={`live-dot ${cameraActive ? 'is-online' : ''}`} /> {demoVideo ? 'UPLOADED MEDIA ACTION STAGE' : 'LIVE CAMERA PREVIEW'}</div>
+                <span>{demoVideo ? 'Live camera + landmarks in upper-right' : 'Mirror corrected · central 92% ROI'}</span>
               </div>
-              <div className="camera-stage live-stage">
+              <div className={`camera-stage live-stage ${demoVideo ? 'has-demo-video' : ''}`}>
+                {demoVideo && <div className="demo-video-viewport">
+                  {demoVideo.kind === 'video' ? <video
+                      ref={demoVideoRef}
+                      src={demoVideo.url}
+                      className="demo-target-media demo-target-video"
+                      controls
+                      muted
+                      playsInline
+                      onEnded={() => {
+                        if (mediaRecorderRef.current?.state === 'recording') stopDemoRecording();
+                        setDemoVideoMessage('The uploaded video reached the end. Replay it or upload another clip.');
+                      }}
+                      style={{ transform: `translate(${demoTransform.x}%, ${demoTransform.y}%) scale(${demoTransform.scale})` }}
+                    /> : <img
+                      ref={demoImageRef}
+                      src={demoVideo.url}
+                      alt="Uploaded gesture action target"
+                      className={`demo-target-media demo-target-image ${imagePreviewActive ? '' : 'preview-paused'}`}
+                      style={{ transform: `translate(${demoTransform.x}%, ${demoTransform.y}%) scale(${demoTransform.scale})` }}
+                    />}
+                </div>}
                 <video ref={videoRef} muted playsInline className={`camera-video ${cameraActive ? 'active' : ''}`} />
                 {followActive && !successVisible && <div className="camera-instruction">{followMessage}</div>}
+                {demoVideo && faceScanActive && <div className="face-focus-overlay" aria-label="Face target action active"><i /><span>FACE TARGET ACTIVE</span></div>}
+                {demoVideo && <div className="demo-live-action" aria-live="polite">
+                  <span>CONFIRMED LIVE ACTION</span>
+                  <strong>{prediction.runtime_action ?? 'Wait / No Action'}</strong>
+                  <small>{humanize(prediction.runtime_prediction)} · {percent(prediction.confidence)}</small>
+                </div>}
+                {demoVideo && <div className="demo-state-badges">
+                  {demoRecording && <span className="recording-badge"><i /> REC</span>}
+                  {objectGrabbed && <span className="grabbed-badge">OBJECT GRABBED</span>}
+                </div>}
+                {demoVideo && actionToast && <div className={`action-toast ${actionToast.status}`} role="status" aria-live="assertive">
+                  <span>{humanize(actionToast.gesture)} gesture</span>
+                  <strong>{actionToast.label}</strong>
+                </div>}
                 {successVisible && <div className="success-overlay" role="status" aria-live="assertive">
                   <span>✓</span><strong>FOLLOW OBJECT<br />DONE SUCCESSFULLY</strong><p>Camera is OFF</p>
                 </div>}
@@ -664,17 +1153,33 @@ export default function Dashboard() {
                   <span className="corner top-left" /><span className="corner top-right" />
                   <span className="corner bottom-left" /><span className="corner bottom-right" />
                   <canvas ref={landmarkCanvasRef} className="landmark-canvas" />
+                  {demoVideo && <div className="webcam-pip-label"><span className={`live-dot ${cameraActive ? 'is-online' : ''}`} /> WEBCAM GESTURE + LANDMARKS</div>}
                   {!cameraActive && !successVisible && <div className="camera-empty">
                     <span className="hand-orbit" /><strong>Camera is ready</strong>
-                    <p>Keep one complete hand and wrist inside the large guide.</p>
+                    <p>{demoVideo ? 'Start the webcam to control the uploaded media.' : 'Keep one complete hand and wrist inside the large guide.'}</p>
                   </div>}
                 </div>
                 <canvas ref={captureCanvasRef} className="capture-canvas" />
+                <canvas ref={demoRecordingCanvasRef} className="capture-canvas" />
               </div>
               <div className="camera-footer">
-                <span>{prediction.status === 'predicted' ? `${prediction.model} runtime` : humanize(prediction.status)}</span>
-                <span>Device {fps(cameraFps)} FPS · inference capped at {targetFps.toFixed(0)} FPS</span>
+                <span>{demoVideo ? `Target ${demoTransform.scale.toFixed(1)}x · X ${demoTransform.x} · Y ${demoTransform.y}` : prediction.status === 'predicted' ? `${prediction.model ?? 'Joblib'} runtime · CPU` : humanize(prediction.status)}</span>
+                <span>Webcam {fps(cameraFps)} FPS · inference capped at {targetFps.toFixed(0)} FPS</span>
               </div>
+              {demoVideo && <div className="demo-action-console">
+                <div className="demo-console-summary">
+                  <div><span>ACTION DISPATCH</span><strong>{demoEvents[0]?.command.replaceAll('_', ' ') ?? 'WAITING'}</strong></div>
+                  <div className="demo-console-buttons">
+                    {recordingDownloadUrl && <a href={recordingDownloadUrl} download="gesture-action-demo.webm">Download recording</a>}
+                    <button type="button" onClick={() => { updateDemoTransform(() => ({ x: 0, y: 0, scale: 1 })); setObjectGrabbed(false); setImagePreviewActive(true); }}>Reset media position</button>
+                  </div>
+                </div>
+                <div className="demo-event-list">
+                  {demoEvents.length ? demoEvents.slice(0, 4).map((event, index) => <div key={`${event.at}-${event.command}-${index}`} className={event.status}>
+                    <span>{event.at}</span><strong>{humanize(event.gesture)} → {event.command.replaceAll('_', ' ')}</strong><p>{event.detail}</p>
+                  </div>) : <p className="empty-note">Stable gesture actions will be proven here as they control the uploaded media.</p>}
+                </div>
+              </div>}
             </article>
 
             <aside className="result-stack">
@@ -870,18 +1375,19 @@ export default function Dashboard() {
               <div className="panel-header"><div>FIRST-TIME SETUP</div><span>4 STEPS</span></div>
               <ol>
                 <li><span>01</span><div><strong>Run setup once</strong><p>Double-click setup_dashboard.bat to create Python and frontend environments.</p></div></li>
-                <li><span>02</span><div><strong>Copy trusted Drive exports</strong><p>Use scripts\import_models.ps1 with the folder downloaded from your own Google Drive.</p></div></li>
-                <li><span>03</span><div><strong>Start the application</strong><p>Double-click start_dashboard.bat. Both local services start and this dashboard opens.</p></div></li>
+                <li><span>02</span><div><strong>Use the included trusted artifacts</strong><p>The signed Joblib bundle and online-learning caches are ready in the models folder.</p></div></li>
+                <li><span>03</span><div><strong>Start the application</strong><p>Double-click start_dashboard.bat. Both local services start on ports 3000 and 8000.</p></div></li>
                 <li><span>04</span><div><strong>Run the 10 FPS test</strong><p>Start the camera. PASS means total measured work fits inside the 100 ms frame budget.</p></div></li>
               </ol>
             </article>
 
             <article className="panel runtime-contract">
-              <div className="panel-header"><div>V18_17 RUNTIME CONTRACT</div><span>EXACT</span></div>
+              <div className="panel-header"><div>JOBLIB RUNTIME CONTRACT</div><span>EXACT</span></div>
               <dl>
                 <div><dt>Inference limit</dt><dd>{targetFps} FPS / 100 ms</dd></div>
                 <div><dt>Taxonomy</dt><dd>{classNames.length} classes</dd></div>
                 <div><dt>Feature vector</dt><dd>76 dimensions</dd></div>
+                <div><dt>Classifiers</dt><dd>SVM · MLP · OnlineMLP</dd></div>
                 <div><dt>Temporal filter</dt><dd>EMA α {health?.config.ema_alpha ?? 0.65}</dd></div>
                 <div><dt>Confidence floor</dt><dd>{percent(health?.config.confidence_floor ?? 0.70)}</dd></div>
                 <div><dt>Follow Object</dt><dd>Palm → Fist → Palm</dd></div>

@@ -142,7 +142,7 @@ stop_dashboard.bat
 
 ## Running the 10 FPS qualification test
 
-1. Open **Live** and click **Start 10 FPS test**.
+1. Open **Live** and click **Start webcam**.
 2. Allow camera permission when the browser asks.
 3. Keep one complete hand and wrist inside the large green guide.
 4. Test several classes for at least 20–30 seconds, including `no_gesture`.
@@ -169,6 +169,36 @@ FPS. The first few frames are warm-up frames; judge the stable readings.
 If the webcam itself supplies only 10 FPS, the model still runs. More camera FPS
 does not make this test process more than 10 FPS because the application cap and
 one-frame back pressure remain active.
+
+## Uploaded media action demo
+
+The Live page can prove that a recognized gesture performs an action instead of
+only displaying a label:
+
+1. Click **Upload video / image** and choose a local image or a video no longer
+   than 60 seconds.
+2. Click **Start webcam**. The webcam and landmark overlay appear in the upper-right
+   corner while the uploaded media remains visible as the action target.
+3. Hold a gesture until the normal EMA/stable-frame gate confirms its action.
+4. Release or change the gesture before repeating the same command.
+
+| Gesture | Demonstrated action |
+| --- | --- |
+| `call` | Shows the face-target focus overlay. |
+| `rock` | Pauses the uploaded video or dims the image. |
+| `like` | Stops/continues video playback or the image preview. |
+| `ok` | Starts recording the transformed media stage. |
+| `peace` | Ends recording and provides a WebM download. |
+| `one`, `one_down`, `one_left`, `one_right` | Moves the media up, down, left or right. |
+| `palm` | Opens/plays the media or releases a grabbed object. |
+| `dorsal_hand` | Restores the original position and zoom. |
+| `fist` | Marks the target object as grabbed. |
+| `zoom_in`, `zoom_out` | Visibly enlarges or reduces the media. |
+| Follow Object completion | Reports the completed Palm–Fist–Palm procedure. |
+
+Each performed command also produces a glowing confirmation message and an action
+event entry. Media processing stays inside the browser; the uploaded file is not
+sent to an external service.
 
 ## Follow Object
 
