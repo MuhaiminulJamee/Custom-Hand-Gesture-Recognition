@@ -14,6 +14,7 @@ from sklearn.metrics import classification_report, confusion_matrix
 
 from backend.artifact_integrity import ArtifactRegistry
 from backend.config import RuntimeConfig
+from backend.hand_detection import DETECTOR_SETTINGS
 from research.v18_20 import LABELS, load_npz, evaluate, predict_onnx, benchmark
 
 
@@ -63,6 +64,7 @@ def qualify(root, deploy=False):
                     onnx_sha256=selection['model_sha256'], onnx_bytes=candidate.stat().st_size,
                     onnx_ir_version=8, opsets={'ai.onnx': 16}, parity=parity,
                     internal_class_order=LABELS, training_labels_ncm_calibrated=True,
+                    landmark_detector=DETECTOR_SETTINGS,
                     runtime_geometry={'dorsal_independent_support': True,
                                       'minimum_unknown_model_hold_seconds': 0.35,
                                       'reviewed_negative_feedback_veto': True},

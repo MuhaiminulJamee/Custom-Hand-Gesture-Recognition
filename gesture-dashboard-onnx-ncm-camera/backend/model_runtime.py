@@ -17,12 +17,10 @@ from .config import MODELS_DIRECTORY, RuntimeConfig
 from .follow_object import FollowObjectStateMachine
 from .geometry import GeometryResolver, landmarks_to_feature
 from .runtime import TemporalGate
+from .hand_detection import HandDetector, DETECTOR_SETTINGS
 
 
-MIN_HAND_DETECTION_CONFIDENCE = 0.55
-MIN_HAND_PRESENCE_CONFIDENCE = 0.55
-MIN_HAND_TRACKING_CONFIDENCE = 0.60
-MIN_HAND_AREA_RATIO = 0.018
+MIN_HAND_AREA_RATIO = 0.0001
 LANDMARK_SLOW_ALPHA = 0.18
 LANDMARK_FAST_ALPHA = 0.72
 LANDMARK_MOTION_GAIN = 1.35
@@ -214,7 +212,7 @@ class RuntimeSession:
         })
         # Tiny or substantially clipped landmark clouds are not reliable enough for
         # the classifier and are a common source of background false positives.
-        if diagonal < 0.045 or area < MIN_HAND_AREA_RATIO or inside_fraction < 0.86:
+        if diagonal < 0.025 or area < MIN_HAND_AREA_RATIO or inside_fraction < 0.86:
             base_diagnostics["reason"] = "implausible_landmark_geometry"
             return None, base_diagnostics
 
@@ -728,108 +726,6 @@ def adaptive_low_light_preprocess(
     return output, diagnostics
 
 
-class HandDetector:
-    def __init__(self, model_path: Path):
-        self.ready = False
-        self.error: str | None = None
-        self._landmarker = None
-        self._mp = None
-        self.running_mode = "VIDEO"
-        self._timestamp_lock = threading.Lock()
-        self._last_timestamp_ms = -1
-        self._last_diagnostics: dict[str, Any] = {
-            "running_mode": self.running_mode,
-            "timestamp_ms": None,
-            "timestamp_adjusted": False,
-            "candidate_count": 0,
-            "selected_handedness": None,
-            "selected_handedness_confidence": None,
-            "selected_bbox_area": None,
-            "minimum_bbox_area_ratio": MIN_HAND_AREA_RATIO,
-            "rejection_reason": None,
-        }
-        if not model_path.exists():
-            self.error = f"Missing MediaPipe hand model: {model_path.name}"
-            return
-        try:
-            import mediapipe as mp
-
-            options = mp.tasks.vision.HandLandmarkerOptions(
-                base_options=mp.tasks.BaseOptions(model_asset_path=str(model_path)),
-                running_mode=mp.tasks.vision.RunningMode.VIDEO,
-                num_hands=1,
-                min_hand_detection_confidence=MIN_HAND_DETECTION_CONFIDENCE,
-                min_hand_presence_confidence=MIN_HAND_PRESENCE_CONFIDENCE,
-                min_tracking_confidence=MIN_HAND_TRACKING_CONFIDENCE,
-            )
-            self._landmarker = mp.tasks.vision.HandLandmarker.create_from_options(options)
-            self._mp = mp
-            self.ready = True
-        except Exception as error:
-            self.error = f"MediaPipe initialization failed: {error}"
-
-    def detect(self, rgb_image: np.ndarray) -> np.ndarray | None:
-        if not self.ready or self._landmarker is None or self._mp is None:
-            return None
-        image = self._mp.Image(
-            image_format=self._mp.ImageFormat.SRGB,
-            data=np.ascontiguousarray(rgb_image, dtype=np.uint8),
-        )
-        with self._timestamp_lock:
-            monotonic_ms = int(time.monotonic_ns() // 1_000_000)
-            timestamp_ms = max(monotonic_ms, self._last_timestamp_ms + 1)
-            timestamp_adjusted = timestamp_ms != monotonic_ms
-            self._last_timestamp_ms = timestamp_ms
-        result = self._landmarker.detect_for_video(image, timestamp_ms)
-        handedness_rows = list(getattr(result, "handedness", []) or [])
-        candidates: list[tuple[float, float | None, str | None, np.ndarray]] = []
-        for index, hand in enumerate(getattr(result, "hand_landmarks", []) or []):
-            points = np.asarray([[item.x, item.y] for item in hand], dtype=np.float32)
-            if points.shape == (21, 2) and np.isfinite(points).all():
-                area = float(np.ptp(points[:, 0]) * np.ptp(points[:, 1]))
-                handedness_name: str | None = None
-                handedness_score: float | None = None
-                if index < len(handedness_rows) and handedness_rows[index]:
-                    category = handedness_rows[index][0]
-                    handedness_name = str(
-                        getattr(category, "category_name", None)
-                        or getattr(category, "display_name", None)
-                        or ""
-                    ) or None
-                    raw_score = getattr(category, "score", None)
-                    if raw_score is not None:
-                        handedness_score = float(raw_score)
-                candidates.append(
-                    (area, handedness_score, handedness_name, points)
-                )
-        selected = max(candidates, key=lambda item: item[0]) if candidates else None
-        rejected_for_area = bool(
-            selected is not None and selected[0] < MIN_HAND_AREA_RATIO
-        )
-        self._last_diagnostics = {
-            "running_mode": self.running_mode,
-            "timestamp_ms": timestamp_ms,
-            "timestamp_adjusted": timestamp_adjusted,
-            "candidate_count": len(candidates),
-            "selected_handedness": selected[2] if selected else None,
-            "selected_handedness_confidence": selected[1] if selected else None,
-            "selected_bbox_area": selected[0] if selected else None,
-            "minimum_bbox_area_ratio": MIN_HAND_AREA_RATIO,
-            "rejection_reason": (
-                "hand_bbox_below_minimum" if rejected_for_area else None
-            ),
-        }
-        return selected[3] if selected and not rejected_for_area else None
-
-    def diagnostics(self) -> dict[str, Any]:
-        return dict(self._last_diagnostics)
-
-    def close(self) -> None:
-        landmarker = self._landmarker
-        self._landmarker = None
-        self.ready = False
-        if landmarker is not None and hasattr(landmarker, "close"):
-            landmarker.close()
 
 
 class InferenceEngine:
@@ -861,6 +757,7 @@ class InferenceEngine:
                 "input_mirrored": False,
                 "adaptive_low_light_preprocessing": True,
                 "per_session_landmark_smoothing": True,
+                "detection_policy": DETECTOR_SETTINGS,
             },
             "ready": self.model_manager.ready and self.detector.ready,
         }
@@ -969,6 +866,7 @@ class InferenceEngine:
         image = cv2.imdecode(np.frombuffer(image_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
         if image is None:
             return {"status": "invalid_image", "message": "The frame could not be decoded."}
+        source_height, source_width = image.shape[:2]
         if center_crop_ratio is not None:
             ratio = min(1.0, max(0.1, float(center_crop_ratio)))
             height, width = image.shape[:2]
@@ -976,9 +874,14 @@ class InferenceEngine:
             left = max(0, (width - side) // 2)
             top = max(0, (height - side) // 2)
             image = image[top : top + side, left : left + side]
-            image = cv2.resize(image, (320, 320), interpolation=cv2.INTER_AREA)
+        # Keep native detail for distant fingers, with a bounded workload.
+        if max(image.shape[:2]) > 960:
+            scale = 960 / max(image.shape[:2])
+            image = cv2.resize(image, (round(image.shape[1] * scale), round(image.shape[0] * scale)), interpolation=cv2.INTER_AREA)
         preprocess_started = time.perf_counter()
         detection_image, image_quality = adaptive_low_light_preprocess(image)
+        image_quality.update(source_width=source_width, source_height=source_height,
+                             analysis_width=image.shape[1], analysis_height=image.shape[0])
         preprocess_ms = (time.perf_counter() - preprocess_started) * 1000
         rgb = cv2.cvtColor(detection_image, cv2.COLOR_BGR2RGB)
 
@@ -1021,7 +924,27 @@ class InferenceEngine:
 
         with self._lock:
             landmark_started = time.perf_counter()
-            raw_landmarks = self.detector.detect(rgb)
+            def candidate_score(points):
+                try:
+                    probabilities, _, _, quality = self.model_manager.predict_detailed(
+                        landmarks_to_feature(points), model_name)
+                    resolved, details = self.resolver.resolve(probabilities, points)
+                    pose = details.get("pose_validation") or {}
+                    mass = float(quality.get("known_gesture_mass", 1.0))
+                    ordered = np.sort(resolved)
+                    valid = bool(pose.get("valid", True))
+                    supported = bool(pose.get("geometry_supported", False)) and float(
+                        (quality.get("online_adapter") or {}).get("negative_support", 0)) <= 0
+                    if valid and (mass >= self.config.known_mass_floor or supported) and (
+                        ordered[-1] >= self.config.confidence_floor
+                        and ordered[-1] - ordered[-2] >= self.config.probability_margin_floor
+                    ):
+                        return 1.0
+                    return mass * 0.5 if valid else 0.0
+                except ValueError:
+                    return -0.5
+            raw_landmarks = (self.detector.detect(rgb, candidate_score=candidate_score)
+                             if isinstance(self.detector, HandDetector) else self.detector.detect(rgb))
             mediapipe_ms = (time.perf_counter() - landmark_started) * 1000
             detector_quality = (
                 self.detector.diagnostics()
@@ -1042,6 +965,9 @@ class InferenceEngine:
                     landmark_quality=landmark_quality,
                     message="No usable hand was found inside the guide.",
                 )
+            if detector_quality.get("reacquired"):
+                session.reset_landmark_tracking()
+                session.temporal_gate.reset()
             landmarks, landmark_quality = session.stabilize_landmarks(
                 raw_landmarks, now
             )
@@ -1086,6 +1012,12 @@ class InferenceEngine:
         resolved_probabilities = resolved_rows[selected_name]
         resolver_details = resolver_rows[selected_name]
         pose_validation = resolver_details.get("pose_validation") or {}
+        if hasattr(self.detector, "request_pose_recovery") and (
+            not pose_validation.get("valid", True)
+            or (float(selected_quality.get("known_gesture_mass", 1.0)) < self.config.known_mass_floor
+                and not pose_validation.get("geometry_supported", False))
+        ):
+            self.detector.request_pose_recovery()
         decision = session.temporal_gate.update(
             resolved_probabilities,
             now=now,

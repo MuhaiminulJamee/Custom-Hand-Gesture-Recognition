@@ -1,0 +1,21 @@
+{
+  "evidence": "Replay of 50 user-held Left development frames; not a new-person or physical-distance test",
+  "source_camera_resolution": [
+    640,
+    480
+  ],
+  "analysis_resolution": [
+    442,
+    442
+  ],
+  "before_hand_tracked": 0,
+  "after_hand_tracked": 44,
+  "left_label_frames": 44,
+  "confirmed_left_frames": 32,
+  "other_confirmed_gestures": 0,
+  "frames": 50,
+  "pipeline_p95_ms": 74.43517000010614,
+  "frames_over_100ms": 1,
+  "physical_distance_m": null,
+  "maximum_reliable_distance_m": null
+}

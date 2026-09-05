@@ -2,6 +2,12 @@
 
 Current release: **v18_20**. See [V18_20_README.md](V18_20_README.md) for current training data, notebook, metrics, and limitations. Prior-release statistics below are historical.
 
+The camera runtime now preserves native hand detail, reacquires side-view poses,
+and includes a calibrated distance/range-test panel with CSV export. See
+[HAND_DISTANCE.md](HAND_DISTANCE.md) for the measurement procedure and the exact
+captured Left-case results. No fixed maximum distance is claimed until it is
+measured on the target camera under representative movement and lighting.
+
 This is the isolated development-board-camera edition of the gesture system. It
 uses an eight-output ONNX classifier, MediaPipe's 76-D hand feature pipeline,
 open-set rejection, geometry checks, temporal stability, safe reviewed online
@@ -34,7 +40,7 @@ NCM camera client
   CRC32 · sequence tracking · reconnect · JPEG validation
         │
         ▼
-low-light/blank-frame checks → MediaPipe VIDEO Hand Landmarker
+low-light/blank-frame checks → MediaPipe VIDEO Hand Landmarker + bounded recovery
         │
         ▼
 smoothed landmarks → normalized 76-D features → eight-output ONNX Runtime MLP

@@ -4,6 +4,7 @@
 /* eslint-disable @next/next/no-img-element */
 
 import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import RangeDiagnostics, { type RangePrediction } from './range-diagnostics';
 
 const API_URL = process.env.NEXT_PUBLIC_GESTURE_API_URL ?? 'http://127.0.0.1:8200';
 const WS_URL = API_URL.replace(/^http/, 'ws');
@@ -180,7 +181,7 @@ type NcmStatus = {
     discovery_payload: string;
   };
 };
-type Prediction = {
+type Prediction = RangePrediction & {
   status: string;
   message?: string;
   model?: string;
@@ -971,6 +972,7 @@ export default function Dashboard() {
       </nav>
 
       <section className="workspace">
+        <div hidden={activeTab !== 'live' && activeTab !== 'feedback'}><RangeDiagnostics prediction={prediction} connected={cameraActive} /></div>
         {activeTab === 'live' && <>
           <div className="section-heading">
             <div><p className="eyebrow">EIGHT-GESTURE RECOGNITION</p><h2>{targetFps.toFixed(0)} FPS JLIP camera qualification</h2></div>

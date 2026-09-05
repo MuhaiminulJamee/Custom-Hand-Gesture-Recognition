@@ -1,0 +1,23 @@
+{
+  "evidence": "Local development background crops, not a population false-positive estimate",
+  "results": [
+    {
+      "control": "background",
+      "frames": 12,
+      "confirmed_commands": 0,
+      "hand_candidates": 0
+    },
+    {
+      "control": "face_without_hand",
+      "frames": 12,
+      "confirmed_commands": 0,
+      "hand_candidates": 0
+    },
+    {
+      "control": "desk_without_hand",
+      "frames": 12,
+      "confirmed_commands": 0,
+      "hand_candidates": 0
+    }
+  ]
+}

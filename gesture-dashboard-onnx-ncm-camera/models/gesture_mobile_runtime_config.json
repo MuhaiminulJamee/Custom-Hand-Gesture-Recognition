@@ -121,8 +121,8 @@
   "frame_interval_ms": 100,
   "num_hands": 1,
   "recommended_analysis_resolution": [
-    320,
-    320
+    960,
+    960
   ],
   "roi_size_ratio": 0.92,
   "camera_orientation": {
@@ -130,11 +130,19 @@
     "direction_semantics": "unmirrored NCM pixels with calibrated commands: positive index x maps to left and negative index x maps to right"
   },
   "hand_detection": {
-    "running_mode": "VIDEO",
+    "running_mode": "VIDEO with IMAGE recovery",
     "minimum_detection_confidence": 0.55,
     "minimum_presence_confidence": 0.55,
     "minimum_tracking_confidence": 0.6,
-    "minimum_hand_area_ratio": 0.018
+    "recovery_detection_confidence": 0.3,
+    "recovery_presence_confidence": 0.4,
+    "minimum_palm_pixels": 8,
+    "minimum_hand_span_pixels": 24,
+    "minimum_hand_short_side_pixels": 10,
+    "maximum_analysis_dimension": 960,
+    "maximum_detection_passes_per_frame": 2,
+    "recovery_start_budget_ms": 55,
+    "distance_method": "user-calibrated apparent palm size; no absolute MediaPipe depth"
   },
   "low_light_enhancement": {
     "enabled": true,
@@ -249,5 +257,6 @@
     "internal_classes": 9,
     "classifier_threads": 1,
     "public_test_runtime_macro_f1": 0.9900694692254061
-  }
+  },
+  "analysis_resize_policy": "Preserve native central-ROI detail; only downscale if larger than 960 pixels"
 }

@@ -1,5 +1,10 @@
 # v18_20
 
+The latest camera update adds native-detail recovery for side-view Left and a
+calibrated distance/range-test panel. See [HAND_DISTANCE.md](HAND_DISTANCE.md) for
+measurement steps, the captured-case results, and the remaining limits. The
+earlier classification and timing results below describe the original v18_20 run.
+
 Open `v18_20.ipynb` in this project with the `.venv` Python kernel. It contains
 executed metrics, count and normalized confusion matrices, per-class scores,
 ROC/PR curves, learning curves, subgroup coverage, latency, and an optional live

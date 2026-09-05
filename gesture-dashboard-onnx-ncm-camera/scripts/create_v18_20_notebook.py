@@ -427,6 +427,46 @@ else:
     print('Camera is off. Enable RUN_LIVE_CAMERA to perform an interactive, labelled live test.')
 ''')
 markdown('''
+### Camera-distance tests and the latest Left recovery
+
+The dashboard now has a **Hand distance & detection range** panel in Live and
+Feedback. Calibrate with a steady palm at an independently measured distance,
+then test each gesture at measured positions. Export the CSV and place
+`gesture-distance-tests.csv` beside this notebook. See `HAND_DISTANCE.md` for the
+protocol and limitations. The earlier live timing table is the original v18_20
+run; this section records the later image-detector change separately.
+
+Distance is inferred from calibrated apparent palm size, not MediaPipe's relative
+Z coordinate. Palm rotation, person changes, zoom, blur, and occlusion can bias it.
+No distance is inferred when the hand disappears. The test's manually measured
+distance still identifies that failure location. Repeated frames are correlated;
+these rates are observations within a trial, not independent population samples.
+''')
+code('''
+left_case = ARTIFACTS / 'left_range_regression.json'
+if left_case.exists():
+    display(pd.DataFrame([json.loads(left_case.read_text())]))
+    print('Development-case replay; physical distance and maximum reliable distance were not measured.')
+range_csv = ROOT / 'gesture-distance-tests.csv'
+if range_csv.exists():
+    range_rows = pd.read_csv(range_csv)
+    required = {'measured_m', 'expected', 'hand_found', 'command_correct', 'estimated_m', 'processing_ms'}
+    assert required.issubset(range_rows.columns), f'Missing columns: {required - set(range_rows.columns)}'
+    for column in ['hand_found', 'command_correct']:
+        values = range_rows[column].astype(str).str.lower()
+        assert values.isin(['true', 'false']).all(), f'Invalid boolean values in {column}'
+        range_rows[column] = values.eq('true')
+    range_rows['distance_absolute_error_m'] = (range_rows.estimated_m - range_rows.measured_m).abs()
+    range_summary = range_rows.groupby(['measured_m', 'expected']).agg(
+        observations=('hand_found', 'size'), hand_tracking_rate=('hand_found', 'mean'),
+        correct_confirmed_rate=('command_correct', 'mean'),
+        valid_distance_estimates=('estimated_m', 'count'), distance_mae_m=('distance_absolute_error_m', 'mean'),
+        pipeline_p95_ms=('processing_ms', lambda values: values.quantile(.95)))
+    display(range_summary)
+else:
+    print('No measured range-test CSV supplied. Use the dashboard test and export gesture-distance-tests.csv.')
+''')
+markdown('''
 ## Takeaways
 
 The balanced public-data model improves the new public-test command acceptance

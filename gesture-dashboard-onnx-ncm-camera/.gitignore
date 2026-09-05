@@ -47,6 +47,7 @@ next-env.d.ts
 /.runtime/
 /data/v18_20/*.zip
 /v18_20_bundle.zip
+/gesture-distance-tests.csv
 
 # Trained/exported artifacts and reviewed local data
 /models/*.joblib

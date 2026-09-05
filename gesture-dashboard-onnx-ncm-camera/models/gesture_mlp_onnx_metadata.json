@@ -217,5 +217,20 @@
     "dorsal_independent_support": true,
     "minimum_unknown_model_hold_seconds": 0.35,
     "reviewed_negative_feedback_veto": true
+  },
+  "landmark_detector": {
+    "running_mode": "VIDEO with IMAGE recovery",
+    "minimum_detection_confidence": 0.55,
+    "minimum_presence_confidence": 0.55,
+    "minimum_tracking_confidence": 0.6,
+    "recovery_detection_confidence": 0.3,
+    "recovery_presence_confidence": 0.4,
+    "minimum_palm_pixels": 8,
+    "minimum_hand_span_pixels": 24,
+    "minimum_hand_short_side_pixels": 10,
+    "maximum_analysis_dimension": 960,
+    "maximum_detection_passes_per_frame": 2,
+    "recovery_start_budget_ms": 55,
+    "distance_method": "user-calibrated apparent palm size; no absolute MediaPipe depth"
   }
 }

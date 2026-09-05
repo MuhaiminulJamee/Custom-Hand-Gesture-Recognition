@@ -15,7 +15,7 @@ def package(root):
             if path.name == 'last_live_test.csv':
                 continue
             paths.append(path)
-    for name in ['v18_20.ipynb', 'V18_20_README.md', 'requirements.txt', 'requirements-model-build.txt', 'requirements-notebook.txt', 'pytest.ini']:
+    for name in ['v18_20.ipynb', 'V18_20_README.md', 'HAND_DISTANCE.md', 'requirements.txt', 'requirements-model-build.txt', 'requirements-notebook.txt', 'pytest.ini']:
         paths.append(root / name)
     target = root / 'v18_20_bundle.zip'
     with zipfile.ZipFile(target, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:

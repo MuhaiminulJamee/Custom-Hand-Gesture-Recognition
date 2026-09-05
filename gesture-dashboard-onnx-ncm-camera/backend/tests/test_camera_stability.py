@@ -174,6 +174,9 @@ def test_hand_detector_uses_video_mode_and_strict_monotonic_timestamps(
             handedness = [[SimpleNamespace(category_name="Right", score=0.91)]]
             return SimpleNamespace(hand_landmarks=[points], handedness=handedness)
 
+        def detect(self, _image):
+            return SimpleNamespace(hand_landmarks=[], handedness=[])
+
         def close(self):
             return None
 
@@ -181,13 +184,14 @@ def test_hand_detector_uses_video_mode_and_strict_monotonic_timestamps(
 
     class FakeOptions:
         def __init__(self, **kwargs):
-            captured_options.update(kwargs)
+            if kwargs.get("running_mode") is video_mode:
+                captured_options.update(kwargs)
 
     fake_mp = SimpleNamespace(
         tasks=SimpleNamespace(
             BaseOptions=lambda **kwargs: SimpleNamespace(**kwargs),
             vision=SimpleNamespace(
-                RunningMode=SimpleNamespace(VIDEO=video_mode),
+                RunningMode=SimpleNamespace(VIDEO=video_mode, IMAGE=object()),
                 HandLandmarkerOptions=FakeOptions,
                 HandLandmarker=SimpleNamespace(
                     create_from_options=lambda _options: landmarker
@@ -203,11 +207,11 @@ def test_hand_detector_uses_video_mode_and_strict_monotonic_timestamps(
     model_path.write_bytes(b"fake")
 
     detector = HandDetector(model_path)
-    first = detector.detect(np.zeros((16, 16, 3), dtype=np.uint8))
-    second = detector.detect(np.zeros((16, 16, 3), dtype=np.uint8))
+    first = detector.detect(np.zeros((320, 320, 3), dtype=np.uint8))
+    second = detector.detect(np.zeros((320, 320, 3), dtype=np.uint8))
     landmarker.spacing = 0.01
     rejected_small_hand = detector.detect(
-        np.zeros((16, 16, 3), dtype=np.uint8)
+        np.zeros((320, 320, 3), dtype=np.uint8)
     )
 
     assert detector.ready is True
@@ -219,4 +223,4 @@ def test_hand_detector_uses_video_mode_and_strict_monotonic_timestamps(
     assert timestamps == [1, 2, 3]
     assert detector.diagnostics()["timestamp_ms"] == 3
     assert detector.diagnostics()["selected_handedness_confidence"] == 0.91
-    assert detector.diagnostics()["rejection_reason"] == "hand_bbox_below_minimum"
+    assert detector.diagnostics()["rejection_reason"] == "insufficient_hand_pixels"
