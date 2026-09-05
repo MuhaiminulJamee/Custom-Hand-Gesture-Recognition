@@ -1,44 +1,44 @@
 {
   "artifacts": {
     "eight_gesture_classification_report.csv": {
-      "bytes": 566,
-      "sha256": "55349192223ae6a2a2dcc2bc836e136132112589fba25bfad17bab60d0c78cfd"
+      "bytes": 520,
+      "sha256": "6f96f1a65423da210e79f1d428cfab11ae40d74a2be62c021418ee8570f9a79c"
     },
     "eight_gesture_confusion_matrix.csv": {
       "bytes": 248,
-      "sha256": "85bab5944926eec1cd45f017656bc0b42e5add3659e1440269b400979e140713"
+      "sha256": "43e8d416f156e8653ac2ff3ce8711c7e9fc7a4e4c10b7dda4dd0b39f592ccaf8"
     },
     "eight_gesture_hard_case_metrics.csv": {
-      "bytes": 276,
-      "sha256": "dfb911c841df81b9602ec79e089bbdc2a1cba940b7627f49a8ea1c20f26239c2"
+      "bytes": 263,
+      "sha256": "2bf4a24db7a63db45be5bbe538f852330a42c6d7093c543b093ca4558aa54bc5"
     },
     "eight_gesture_test_metrics.csv": {
-      "bytes": 334,
-      "sha256": "040bdc7cf7a4945efbcbb2407980d1fa064aab2765663e74a4fdb3c3cc8dca64"
+      "bytes": 279,
+      "sha256": "7aeab0348a9eca5dc831b25bbbc36ce1dea33edf90cd7091a90f427d0984b2c2"
     },
     "gesture_mlp_onnx_metadata.json": {
-      "bytes": 4539,
-      "sha256": "f2728e5bcd23bc2a274df47ec6a41274f8e962e208b02869de93980ba68ae237"
+      "bytes": 6093,
+      "sha256": "ba41b2ef89db4df061b31af4a837e2721e9883e3f6b4b0ffd52dd2dd1d178c8b"
     },
     "gesture_mlp_production.onnx": {
-      "bytes": 79107,
-      "sha256": "faa40884add797e109ce5f2f702d3ab497175cb3a8270e51b1fc5cc78a4e732a"
+      "bytes": 76452,
+      "sha256": "1aec12c072aa86e5f72de405ffba9f0914eb0a7939a19fcb069152b46931fc95"
     },
     "gesture_mobile_runtime_config.json": {
-      "bytes": 6735,
-      "sha256": "c5ac440d0fadfc78467c547abf64b272f2d7db25835b161608e23cf773065410"
+      "bytes": 6998,
+      "sha256": "eda33ebff7b922051cf23db94d62e062e713637068d46d2399658508b75a137c"
     },
     "gesture_online_replay_cache.npz": {
-      "bytes": 504873,
-      "sha256": "7f3ccf61d5a6dcd84ce159d9e1a7df7dc60ec0934bd2a07cb30c599ad314ab6b"
+      "bytes": 504860,
+      "sha256": "adb0f788e2330873b468574fa44c89a65ee047fd194372cd39f9e648cd8b4f69"
     },
     "gesture_online_untouched_test_cache.npz": {
       "bytes": 1178888,
-      "sha256": "ceb2d8b502e3570a96fb0c0bbfe9773a8af151106ecb97deda31f37c3828bf53"
+      "sha256": "08db7978ad593b3f2e51232941fd3305dd0366ebed5713492481f893f0903664"
     },
     "gesture_online_validation_cache.npz": {
       "bytes": 1151531,
-      "sha256": "b79a121bd63b2d6f9913449b404b95de678b32e609eadac1c0eb0d33938c910a"
+      "sha256": "bf7f3f8a59df52fd7fef407c10bd4d3f0d5f226437dde1acc832df354aabe6dc"
     },
     "hand_landmarker.task": {
       "bytes": 7819105,
@@ -55,8 +55,8 @@
     "dorsal",
     "ok"
   ],
-  "created_utc": "2026-09-05T04:25:34.742649+00:00",
+  "created_utc": "2026-09-05T09:01:41.940576+00:00",
   "feature_count": 76,
-  "release_fingerprint": "3b95673649d55dd6f485861c78f0b83aa87817404f4cd1d21577ea8539da9d2c",
+  "release_fingerprint": "26e836e3291bbb24660699e6e371ecc662c61fd6be7e2eef2b8b8b2f7d518dcd",
   "schema_version": 1
 }

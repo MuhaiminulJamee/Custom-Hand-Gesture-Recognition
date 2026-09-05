@@ -35,6 +35,7 @@ from .model_runtime import InferenceEngine, RuntimeSession
 from .ncm_camera import NcmCameraClient, NcmCameraConfig
 from .observability import RuntimeMetrics, configure_logging
 from .online_learning import OnlineLearningService
+from .runtime import InferenceStartLimiter
 from .storage import FeedbackRecord, FeedbackStore, artifact_status, load_metric_files
 
 
@@ -108,9 +109,28 @@ def _build_services() -> tuple[
 
 
 runtime_config, engine, feedback_store, online_learning = _build_services()
+inference_start_limiter = InferenceStartLimiter(runtime_config.frame_interval_ms)
 ncm_camera = NcmCameraClient(NcmCameraConfig.from_environment())
 action_history: deque[dict[str, Any]] = deque(maxlen=500)
 active_sessions: dict[str, RuntimeSession] = {}
+
+
+async def _process_frame_with_limit(
+    frame: bytes,
+    session: RuntimeSession,
+    model_name: str | None,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    # The reservation is committed before model execution, so a failed inference
+    # cannot let the next request bypass the backend-wide rate limit.
+    await inference_start_limiter.wait_for_start()
+    return await asyncio.to_thread(
+        engine.process_frame,
+        frame,
+        session,
+        model_name,
+        **kwargs,
+    )
 
 
 @asynccontextmanager
@@ -527,7 +547,7 @@ async def predict_image(
     session = RuntimeSession(runtime_config)
     result: dict[str, Any] = {}
     for _ in range(runtime_config.stable_frames_required):
-        result = await asyncio.to_thread(engine.process_frame, content, session, model_name)
+        result = await _process_frame_with_limit(content, session, model_name)
         runtime_metrics.record_frame(result)
     return result
 
@@ -541,6 +561,7 @@ async def reload_artifacts(
     async with service_lock:
         old_engine = engine
         runtime_config, engine, feedback_store, online_learning = _build_services()
+        await inference_start_limiter.configure(runtime_config.frame_interval_ms)
         for session in active_sessions.values():
             session.reset()
         old_engine.close()
@@ -582,8 +603,8 @@ async def live_socket(websocket: WebSocket) -> None:
                     })
                     continue
                 try:
-                    result = await asyncio.to_thread(
-                        engine.process_frame, frame, session, selected_model
+                    result = await _process_frame_with_limit(
+                        frame, session, selected_model
                     )
                 except Exception:
                     runtime_metrics.record_error("inference_exception")
@@ -675,9 +696,7 @@ async def ncm_live_socket(websocket: WebSocket) -> None:
 
     async def prediction_producer() -> None:
         last_frame_id = -1
-        last_processed_at = 0.0
         last_status_sent_at = 0.0
-        target_interval = max(0.001, runtime_config.frame_interval_ms / 1000.0)
         while True:
             frame_id, frame = await asyncio.to_thread(
                 ncm_camera.wait_for_frame, last_frame_id, 1.0
@@ -690,12 +709,8 @@ async def ncm_live_socket(websocket: WebSocket) -> None:
                 await asyncio.sleep(0.1)
                 continue
             last_frame_id = frame_id
-            wait_seconds = target_interval - (time.perf_counter() - last_processed_at)
-            if wait_seconds > 0:
-                await asyncio.sleep(wait_seconds)
             try:
-                result = await asyncio.to_thread(
-                    engine.process_frame,
+                result = await _process_frame_with_limit(
                     frame,
                     session,
                     selected_model,
@@ -709,7 +724,6 @@ async def ncm_live_socket(websocket: WebSocket) -> None:
                     "message": "NCM frame inference failed; reconnect is still active.",
                 })
                 continue
-            last_processed_at = time.perf_counter()
             camera_status = ncm_camera.status()
             last_status_sent_at = time.monotonic()
             result["camera_fps"] = camera_status["camera_fps"]

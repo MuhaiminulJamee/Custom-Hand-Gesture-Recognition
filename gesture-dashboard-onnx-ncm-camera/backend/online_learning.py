@@ -28,9 +28,14 @@ import numpy as np
 
 FEATURE_COUNT = 76
 CLASS_COUNT = 8
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+DIRECTION_SEMANTIC_VERSION = "ncm_unmirrored_horizontal_swap_v1"
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 _DEFAULT_MODELS_DIRECTORY = _PROJECT_ROOT / "models"
+
+
+class _IncompatibleAdapterState(ValueError):
+    """A valid older state that must not be applied to this model contract."""
 
 
 @dataclass(slots=True)
@@ -253,6 +258,13 @@ class OnlineLearningAdapter:
         self.class_names = class_names
         self.feature_names = feature_names
         self.reject_label = reject_label
+        self.direction_semantic_version = DIRECTION_SEMANTIC_VERSION
+        bundle = getattr(model_manager, "bundle_metadata", {})
+        self.base_model_sha256 = (
+            str(bundle.get("model_sha256"))
+            if isinstance(bundle, Mapping) and bundle.get("model_sha256")
+            else None
+        )
         self.class_to_idx = {name: index for index, name in enumerate(class_names)}
         self.state_path = Path(state_path) if state_path is not None else directory / "gesture_online_adapter_state.npz"
         self.replay_path = Path(replay_path) if replay_path is not None else directory / "gesture_online_replay_cache.npz"
@@ -285,10 +297,25 @@ class OnlineLearningAdapter:
         self._lock = threading.RLock()
         self._base_predictor = base_predictor or self._predictor_from_manager(model_manager)
         self._load_error: str | None = None
+        self._state_notice: str | None = None
+        self._quarantined_state_path: Path | None = None
         self._state = self._new_state()
         if self.state_path.is_file():
             try:
                 self._state = self._load_state(self.state_path)
+            except _IncompatibleAdapterState as error:
+                try:
+                    self._quarantined_state_path = self._quarantine_incompatible_state()
+                except OSError as quarantine_error:
+                    self._load_error = (
+                        f"Online adapter state is incompatible ({error}) and could not "
+                        f"be preserved: {quarantine_error}"
+                    )
+                else:
+                    self._state_notice = (
+                        f"Incompatible online adapter state was preserved at "
+                        f"{self._quarantined_state_path}; Safe Learn started fresh."
+                    )
             except (OSError, ValueError, KeyError, json.JSONDecodeError) as error:
                 # Runtime inference stays available with unmodified ONNX output,
                 # but learning is fail-closed until a valid state is restored.
@@ -302,6 +329,16 @@ class OnlineLearningAdapter:
         classifier = models.get("ONNX") if isinstance(models, Mapping) else None
         predictor = getattr(classifier, "predict_proba", None)
         return predictor if callable(predictor) else None
+
+    def _quarantine_incompatible_state(self) -> Path:
+        self.backup_directory.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        token = secrets.token_hex(3)
+        destination = self.backup_directory / (
+            f"incompatible_{self.state_path.stem}_{timestamp}_{token}.npz"
+        )
+        os.replace(self.state_path, destination)
+        return destination
 
     def _new_state(self) -> _AdapterState:
         center, scale = self._normalization_from_available_caches()
@@ -1078,9 +1115,17 @@ class OnlineLearningAdapter:
                 "feedback_labels": [*self.class_names, self.reject_label],
                 "class_count": CLASS_COUNT,
                 "feature_count": FEATURE_COUNT,
+                "direction_semantic_version": self.direction_semantic_version,
+                "base_model_sha256": self.base_model_sha256,
                 "state_path": str(self.state_path),
                 "state_exists": self.state_path.is_file(),
                 "state_error": self._load_error,
+                "state_notice": self._state_notice,
+                "quarantined_state_path": (
+                    None
+                    if self._quarantined_state_path is None
+                    else str(self._quarantined_state_path)
+                ),
                 "replay_cache": replay,
                 "validation_cache": validation,
                 "require_holdout_for_safe": self.require_holdout_for_safe,
@@ -1128,6 +1173,8 @@ class OnlineLearningAdapter:
             "class_names": list(self.class_names),
             "reject_label": self.reject_label,
             "feature_names": list(self.feature_names),
+            "direction_semantic_version": self.direction_semantic_version,
+            "base_model_sha256": self.base_model_sha256,
             "attempted_updates": int(state.attempted_updates),
             "accepted_updates": int(state.accepted_updates),
             "rejected_updates": int(state.rejected_updates),
@@ -1198,13 +1245,30 @@ class OnlineLearningAdapter:
             influences = np.asarray(archive["influences"], dtype=np.float64)
 
         if metadata.get("schema_version") != SCHEMA_VERSION:
-            raise ValueError("unsupported schema version")
+            raise _IncompatibleAdapterState("unsupported schema version")
         if tuple(metadata.get("class_names", ())) != self.class_names:
-            raise ValueError("class order differs from the configured eight-class contract")
+            raise _IncompatibleAdapterState(
+                "class order differs from the configured eight-class contract"
+            )
         if metadata.get("reject_label", "no_gesture") != self.reject_label:
-            raise ValueError("reject label differs from the configured runtime contract")
+            raise _IncompatibleAdapterState(
+                "reject label differs from the configured runtime contract"
+            )
         if tuple(metadata.get("feature_names", ())) != self.feature_names:
-            raise ValueError("feature order differs from the configured 76-D contract")
+            raise _IncompatibleAdapterState(
+                "feature order differs from the configured 76-D contract"
+            )
+        if metadata.get("direction_semantic_version") != self.direction_semantic_version:
+            raise _IncompatibleAdapterState(
+                "direction semantics differ from the calibrated NCM contract"
+            )
+        if (
+            self.base_model_sha256 is not None
+            and metadata.get("base_model_sha256") != self.base_model_sha256
+        ):
+            raise _IncompatibleAdapterState(
+                "base ONNX model differs from the persisted adapter state"
+            )
         adapter_metadata = metadata.get("adapter") or {}
         expected_parameters = {
             "adaptation_strength": self.adaptation_strength,
@@ -1217,9 +1281,13 @@ class OnlineLearningAdapter:
             try:
                 actual = float(adapter_metadata[name])
             except (KeyError, TypeError, ValueError) as error:
-                raise ValueError(f"persisted adapter parameter is missing: {name}") from error
+                raise _IncompatibleAdapterState(
+                    f"persisted adapter parameter is missing: {name}"
+                ) from error
             if not np.isclose(actual, expected, rtol=0.0, atol=1e-12):
-                raise ValueError(f"persisted adapter parameter differs: {name}")
+                raise _IncompatibleAdapterState(
+                    f"persisted adapter parameter differs: {name}"
+                )
         row_count = len(prototypes) if prototypes.ndim == 2 else -1
         if prototypes.shape != (row_count, FEATURE_COUNT):
             raise ValueError("prototype array has an invalid shape")

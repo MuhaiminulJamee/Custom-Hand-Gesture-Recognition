@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import numpy as np
 
 from backend.config import MODELS_DIRECTORY, load_runtime_config
@@ -60,8 +62,21 @@ def test_untouched_cache_qualifies_eight_class_model_and_open_set_gate():
     assert float(np.mean(predicted[down] == dorsal_index)) <= 0.01
 
 
-def test_direction_source_coordinates_are_not_mirrored():
+def test_direction_source_columns_are_ncm_calibrated_without_pixel_mirroring():
     config = load_runtime_config()
+    metadata = json.loads(
+        (MODELS_DIRECTORY / "gesture_mlp_onnx_metadata.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert metadata["source_class_mapping"]["left"] == "one_right"
+    assert metadata["source_class_mapping"]["right"] == "one_left"
+    calibration = metadata["horizontal_direction_calibration"]
+    assert calibration["camera_pixels_mirrored"] is False
+    assert calibration["positive_index_dx_command"] == "left"
+    assert calibration["negative_index_dx_command"] == "right"
+    assert (calibration.get("source_columns_swapped") is True
+            or calibration.get("training_labels_ncm_calibrated") is True)
     with np.load(
         MODELS_DIRECTORY / "gesture_online_validation_cache.npz",
         allow_pickle=False,
@@ -69,7 +84,9 @@ def test_direction_source_coordinates_are_not_mirrored():
         labels = cache["y"].astype(np.int64)
         landmarks = cache["landmarks"].astype(np.float32)
 
-    for label, expected_sign in (("left", -1), ("right", 1)):
+    # The NCM calibration deliberately swaps the old training columns while the
+    # underlying landmark coordinates remain untouched.
+    for label, expected_sign in (("left", 1), ("right", -1)):
         rows = landmarks[labels == config.class_to_idx[label]]
         index_direction_x = rows[:, 8, 0] - rows[:, 5, 0]
         assert np.all(np.sign(index_direction_x) == expected_sign)

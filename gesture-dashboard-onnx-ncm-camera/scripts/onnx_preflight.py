@@ -43,7 +43,7 @@ EXPECTED_ACTIONS = {
     "ok": "Start / Stop Recording",
 }
 EXPECTED_FEATURE_COUNT = 76
-EXPECTED_TARGET_FPS = 20.0
+EXPECTED_TARGET_FPS = 10.0
 MINIMUM_OFFLINE_ACCURACY = 0.985
 MINIMUM_OFFLINE_MACRO_F1 = 0.98
 MINIMUM_KNOWN_ACCEPTANCE = 0.96
@@ -73,9 +73,9 @@ def _contract_errors(config: object, metadata: dict[str, object]) -> list[str]:
     if len(feature_names) != EXPECTED_FEATURE_COUNT:
         errors.append(f"feature count is {len(feature_names)}, expected 76")
     if not np.isclose(float(getattr(config, "target_fps", 0.0)), EXPECTED_TARGET_FPS):
-        errors.append("runtime target must be exactly 20 FPS")
-    if int(getattr(config, "frame_interval_ms", 0)) != 50:
-        errors.append("20 FPS runtime must use a 50 ms frame interval")
+        errors.append("runtime target must be exactly 10 FPS")
+    if int(getattr(config, "frame_interval_ms", 0)) != 100:
+        errors.append("10 FPS runtime must use a 100 ms frame interval")
 
     camera = dict(raw.get("camera_orientation") or {})
     direction = dict(raw.get("directional_resolution") or {})
@@ -87,6 +87,8 @@ def _contract_errors(config: object, metadata: dict[str, object]) -> list[str]:
         errors.append("camera_orientation.mirror_horizontal must be false")
     if direction.get("horizontal_mirror") is not False:
         errors.append("directional_resolution.horizontal_mirror must be false")
+    if direction.get("horizontal_semantic_swap") is not True:
+        errors.append("NCM Left/Right semantic calibration must be enabled")
     if low_light.get("enabled") is not True:
         errors.append("adaptive low-light enhancement must be enabled")
     if landmarks.get("algorithm") != "velocity_adaptive_ema":
@@ -102,13 +104,31 @@ def _contract_errors(config: object, metadata: dict[str, object]) -> list[str]:
         errors.append("metadata output order differs from the eight-command contract")
     if metadata.get("known_mass_output") != "known_gesture_mass":
         errors.append("metadata does not declare the known-gesture-mass output")
+    source_mapping = dict(metadata.get("source_class_mapping") or {})
+    if source_mapping.get("left") != "one_right":
+        errors.append("metadata Left output must use the calibrated one_right source column")
+    if source_mapping.get("right") != "one_left":
+        errors.append("metadata Right output must use the calibrated one_left source column")
+    horizontal_calibration = dict(
+        metadata.get("horizontal_direction_calibration") or {}
+    )
+    if horizontal_calibration.get("camera_pixels_mirrored") is not False:
+        errors.append("metadata must declare unmirrored camera pixels")
+    if not (horizontal_calibration.get("source_columns_swapped") is True
+            or horizontal_calibration.get("training_labels_ncm_calibrated") is True):
+        errors.append("metadata must declare calibrated horizontal labels or a source-column swap")
+    if horizontal_calibration.get("positive_index_dx_command") != "left":
+        errors.append("metadata positive index dx must resolve to Left")
+    if horizontal_calibration.get("negative_index_dx_command") != "right":
+        errors.append("metadata negative index dx must resolve to Right")
     metadata_input = dict(metadata.get("input") or {})
     metadata_shape = list(metadata_input.get("shape") or [])
     if metadata_input.get("dtype") != "float32" or metadata_shape[-1:] != [76]:
         errors.append("metadata input must be float32 [N, 76]")
     runtime_note = str(metadata.get("runtime_note") or "")
-    if "not a ninth classifier class" not in runtime_note:
-        errors.append("metadata must document no_gesture as rejection-only")
+    if ("not a ninth classifier class" not in runtime_note
+            and "not an exposed ninth command" not in runtime_note):
+        errors.append("metadata must document no_gesture as rejection-only at the command output")
     quality = dict(metadata.get("quality") or {})
     try:
         accuracy = float(quality["accuracy"])
@@ -157,7 +177,8 @@ def main() -> int:
         return 1
     print(
         "Eight-gesture runtime contract: PASS | "
-        "8 command outputs + no_gesture rejection | 20 FPS / 50 ms | unmirrored"
+        "8 command outputs + no_gesture rejection | 10 FPS / 100 ms | "
+        "unmirrored with calibrated Left/Right semantics"
     )
 
     engine = InferenceEngine(config)

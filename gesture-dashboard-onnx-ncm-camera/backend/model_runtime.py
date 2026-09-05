@@ -304,6 +304,9 @@ class RuntimeSession:
                 LANDMARK_FAST_ALPHA,
             )
         )
+        # Keep the same smoothing duration when the incoming frame rate varies.
+        elapsed = max(0.001, min(0.5, now - self._last_landmark_at))
+        alpha = 1.0 - (1.0 - alpha) ** (elapsed * self.config.target_fps)
         self._smoothed_landmarks = (
             alpha * points + (1.0 - alpha) * self._smoothed_landmarks
         ).astype(np.float32)
@@ -390,6 +393,10 @@ class OnnxClassifier:
             ) from error
 
         options = ort.SessionOptions()
+        # A thread pool costs more than it saves for this small single-hand MLP.
+        options.intra_op_num_threads = 1
+        options.inter_op_num_threads = 1
+        options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
         options.enable_mem_pattern = True
         options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
         self.session = ort.InferenceSession(
@@ -1089,6 +1096,8 @@ class InferenceEngine:
             rejection_reason=str(
                 pose_validation.get("reason", "pose geometry rejected")
             ),
+            geometry_supported=bool(pose_validation.get("geometry_supported", False))
+            and float((selected_quality.get("online_adapter") or {}).get("negative_support", 0)) <= 0,
         )
 
         diagnostic_results: dict[str, dict[str, Any]] = {}
@@ -1106,6 +1115,8 @@ class InferenceEngine:
                     rejection_reason=str(
                         model_pose.get("reason", "pose geometry rejected")
                     ),
+                    geometry_supported=bool(model_pose.get("geometry_supported", False))
+                    and float((model_quality.get("online_adapter") or {}).get("negative_support", 0)) <= 0,
                 )
             )
             diagnostic_results[name] = {
@@ -1251,7 +1262,7 @@ class InferenceEngine:
             "headroom_ms": float(frame_budget - total_ms),
             "target_fps_capacity_pass": bool(capacity_pass),
             # Kept for older dashboard clients; this now means the configured
-            # target FPS budget (20 FPS in the eight-gesture release).
+            # target FPS budget (10 FPS in the backend-safe release).
             "ten_fps_capacity_pass": bool(capacity_pass),
             "verdict": "PASS" if capacity_pass else "FAIL",
         }

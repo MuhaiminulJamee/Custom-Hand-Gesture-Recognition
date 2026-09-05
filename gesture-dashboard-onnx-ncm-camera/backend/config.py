@@ -151,12 +151,12 @@ class RuntimeConfig:
     feature_names: list[str] = field(default_factory=lambda: FEATURE_NAMES.copy())
     feedback_labels: list[str] = field(default_factory=lambda: FEEDBACK_LABELS.copy())
     reject_label: str = REJECT_LABEL
-    target_fps: float = 20.0
+    target_fps: float = 10.0
     ema_alpha: float = 0.45
     confidence_floor: float = 0.80
     probability_margin_floor: float = 0.18
     known_mass_floor: float = 0.80
-    stable_frames_required: int = 5
+    stable_frames_required: int = 3
     release_frames_required: int = 3
     minimum_hold_seconds: float = 0.18
     action_cooldown_seconds: float = 0.80
@@ -252,14 +252,14 @@ def load_runtime_config(models_directory: Path = MODELS_DIRECTORY) -> RuntimeCon
         feature_names=feature_names,
         feedback_labels=feedback_labels,
         reject_label=reject_label,
-        target_fps=float(data.get("target_fps", 20.0)),
+        target_fps=float(data.get("target_fps", 10.0)),
         ema_alpha=float(smoothing.get("alpha", 0.45)),
         confidence_floor=float(smoothing.get("confidence_floor", 0.80)),
         probability_margin_floor=float(
             smoothing.get("probability_margin_floor", 0.18)
         ),
         known_mass_floor=float(smoothing.get("known_mass_floor", 0.80)),
-        stable_frames_required=int(smoothing.get("stable_frames_required", 5)),
+        stable_frames_required=int(smoothing.get("stable_frames_required", 3)),
         release_frames_required=int(smoothing.get("release_frames_required", 3)),
         minimum_hold_seconds=float(smoothing.get("minimum_hold_seconds", 0.18)),
         action_cooldown_seconds=float(data.get("action_cooldown_seconds", 0.80)),

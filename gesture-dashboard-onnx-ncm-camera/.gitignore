@@ -45,6 +45,8 @@ next-env.d.ts
 **/__pycache__/
 *.pyc
 /.runtime/
+/data/v18_20/*.zip
+/v18_20_bundle.zip
 
 # Trained/exported artifacts and reviewed local data
 /models/*.joblib

@@ -26,8 +26,11 @@ SOURCE_CLASSES = [
     "zoom_out", "no_gesture",
 ]
 CLASS_MAPPING = [
-    ("left", "one_left"),
-    ("right", "one_right"),
+    # The NCM sensor's observed horizontal command semantics are opposite the
+    # source training labels. Swap only these output columns; pixels remain
+    # unmirrored throughout capture, preview, and feature extraction.
+    ("left", "one_right"),
+    ("right", "one_left"),
     ("up", "one"),
     ("down", "one_down"),
     ("open_palm", "palm"),
@@ -412,14 +415,17 @@ def write_runtime_config(
         "reject_label": "no_gesture",
         "feedback_labels": [*TARGET_CLASSES, "no_gesture"],
         "gesture_to_action": GESTURE_TO_ACTION,
-        "target_fps": 20,
-        "frame_interval_ms": 50,
+        "target_fps": 10,
+        "frame_interval_ms": 100,
         "num_hands": 1,
         "recommended_analysis_resolution": [320, 320],
         "roi_size_ratio": 0.92,
         "camera_orientation": {
             "mirror_horizontal": False,
-            "direction_semantics": "unmirrored image coordinates; x decreases left and increases right",
+            "direction_semantics": (
+                "unmirrored NCM pixels with calibrated commands: positive index "
+                "x maps to left and negative index x maps to right"
+            ),
         },
         "hand_detection": {
             "running_mode": "VIDEO",
@@ -451,7 +457,7 @@ def write_runtime_config(
             "confidence_floor": 0.80,
             "probability_margin_floor": 0.18,
             "known_mass_floor": 0.80,
-            "stable_frames_required": 5,
+            "stable_frames_required": 3,
             "release_frames_required": 3,
             "minimum_hold_seconds": 0.18,
             "reject_label": "no_gesture",
@@ -462,6 +468,7 @@ def write_runtime_config(
             "maximum_mean_non_index_finger_extension": 0.70,
             "hard_geometry_veto": True,
             "horizontal_mirror": False,
+            "horizontal_semantic_swap": True,
         },
         "dorsal_resolution": {
             "pose_score": 0.76,
@@ -519,6 +526,13 @@ def write_metadata(
         "known_mass_output": "known_gesture_mass",
         "output_class_order": TARGET_CLASSES,
         "source_class_mapping": {target: source for target, source in CLASS_MAPPING},
+        "horizontal_direction_calibration": {
+            "camera_pixels_mirrored": False,
+            "source_columns_swapped": True,
+            "positive_index_dx_command": "left",
+            "negative_index_dx_command": "right",
+            "reason": "Observed Left/Right inversion on the target NCM camera",
+        },
         "feature_names": feature_names,
         "parity": qualification["parity"],
         "quality": qualification["test_metrics"],

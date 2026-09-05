@@ -1,11 +1,13 @@
 # Model Card — Eight-Gesture MLP ONNX + NCM Camera Release
 
+Current release: **v18_20**. See [V18_20_README.md](V18_20_README.md) for current training data, notebook, metrics, and limitations. Prior-release statistics below are historical.
+
 ## Purpose
 
 Local static-hand command recognition from a USB-NCM development-board camera.
 The release exposes exactly eight command probabilities, uses an open-set
-rejection sentinel for unsafe frames, and targets 20 application frames per
-second with a 50 ms frame budget.
+rejection sentinel for unsafe frames, and enforces a backend-wide ceiling of 10
+inference starts per second with a 100 ms frame budget.
 
 This model is intended for local interactive control after installation-specific
 live validation. It is not a safety-critical controller, identity/biometric
@@ -15,9 +17,12 @@ system, or a substitute for physical controls and fail-safe behavior.
 
 `board JPEG → USB-NCM → JLIP/TCP validation → adaptive image-quality preprocessing → MediaPipe VIDEO Hand Landmarker → filtered 21-point landmarks → 76 float32 features → eight-output ONNX MLP + known-mass score → pose/open-set/EMA gates → mapped action`
 
-The input image and landmarks are not horizontally flipped. Direction semantics
-use source camera coordinates: decreasing x means Left and increasing x means
-Right.
+The input image and landmarks are not horizontally flipped. NCM horizontal
+calibration swaps the legacy source-coordinate interpretation: decreasing x is
+reported as Right and increasing x is reported as Left. This matches the
+front-facing operator's intended direction while preserving the original camera
+pixels. Once resolved, semantic `left` and `right` labels map normally to Move
+Left and Move Right.
 
 ## Model contract
 
@@ -28,8 +33,8 @@ Right.
 - Auxiliary output: known-gesture mass, shape `[N, 1]`
 - Output order: `left`, `right`, `up`, `down`, `open_palm`, `like`, `dorsal`, `ok`
 - Rejection/feedback sentinel: `no_gesture` (not an ONNX output class)
-- ONNX opsets: `ai.onnx` 16 and `ai.onnx.ml` 1
-- Source family: qualified offline MLP reduced to the eight approved commands
+- ONNX opset: `ai.onnx` 16
+- Source family: balanced (128, 64) MLP with eight exposed commands and an internal unknown class
 
 | Runtime label | Action |
 |---|---|
@@ -51,8 +56,8 @@ does not map to an action. The configured runtime uses:
 - probability EMA alpha `0.45`;
 - confidence floor `0.80`;
 - top-class margin floor `0.18`;
-- known-gesture mass floor `0.80`;
-- five stable frames before execution;
+- known-gesture mass floor `0.95`;
+- three stable frames before execution;
 - three release frames and a `0.80 s` action cooldown.
 
 Directional and pose-specific hard geometry vetoes reduce confusion between
@@ -115,7 +120,9 @@ as live-device accuracy.
 ## Required live NCM validation
 
 Before acceptance, collect per-class attempts for all eight commands using the
-actual board, lens, firmware, placement, and approximately 20 FPS stream. Cover
+actual board, lens, firmware, placement, and 10 FPS inference path. The camera
+transport may deliver faster than 10 FPS, but inference must remain capped at
+10 FPS with its 100 ms frame budget. Cover
 normal and low light, varied backgrounds and distances, both hands where
 supported, skin tones, hand sizes, and finger thicknesses. Include explicit
 confusion challenges for Left/Right, Dorsal/Down, Down/non-command poses, and

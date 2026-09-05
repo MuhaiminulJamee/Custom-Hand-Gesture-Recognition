@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -183,6 +184,55 @@ def test_corrupt_state_fails_open_for_inference_and_closed_for_learning(tmp_path
     assert np.allclose(adapter.apply(base, feature), base)
     with pytest.raises(RuntimeError, match="state is invalid"):
         adapter.learn(feature, "left", probabilities=base)
+
+
+def test_old_direction_semantics_are_not_loaded_after_left_right_calibration(
+    tmp_path: Path,
+):
+    adapter = OnlineLearningAdapter(_config(), models_directory=tmp_path)
+    adapter.learn(np.zeros(76), "left", probabilities=_base_row())
+    state_path = tmp_path / "gesture_online_adapter_state.npz"
+    with np.load(state_path, allow_pickle=False) as archive:
+        payload = {name: np.asarray(archive[name]).copy() for name in archive.files}
+    metadata = json.loads(str(payload["metadata_json"].item()))
+    metadata["direction_semantic_version"] = "legacy_horizontal_mapping"
+    payload["metadata_json"] = np.asarray(json.dumps(metadata))
+    np.savez_compressed(state_path, **payload)
+
+    reloaded = OnlineLearningAdapter(_config(), models_directory=tmp_path)
+
+    status = reloaded.status()
+    assert status["ready"] is True
+    assert status["safe_mode_ready"] is True
+    assert status["state_error"] is None
+    assert "Safe Learn started fresh" in str(status["state_notice"])
+    assert Path(str(status["quarantined_state_path"])).is_file()
+    assert not state_path.exists()
+    assert np.allclose(reloaded.apply(_base_row(), np.zeros(76)), _base_row())
+
+
+def test_adapter_state_is_bound_to_the_base_onnx_model(tmp_path: Path):
+    first_manager = SimpleNamespace(
+        bundle_metadata={"model_sha256": "model-a"}, models={}
+    )
+    first = OnlineLearningAdapter(
+        _config(), model_manager=first_manager, models_directory=tmp_path
+    )
+    first.learn(np.zeros(76), "left", probabilities=_base_row())
+
+    next_manager = SimpleNamespace(
+        bundle_metadata={"model_sha256": "model-b"}, models={}
+    )
+    reloaded = OnlineLearningAdapter(
+        _config(), model_manager=next_manager, models_directory=tmp_path
+    )
+
+    status = reloaded.status()
+    assert status["ready"] is True
+    assert status["safe_mode_ready"] is True
+    assert status["state_error"] is None
+    assert "Safe Learn started fresh" in str(status["state_notice"])
+    assert Path(str(status["quarantined_state_path"])).is_file()
 
 
 def test_apply_supports_batches_and_rejects_unsafe_learning_modes(tmp_path: Path):

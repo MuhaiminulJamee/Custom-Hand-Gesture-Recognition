@@ -117,8 +117,8 @@
     "dorsal": "Return to Default Position",
     "ok": "Start / Stop Recording"
   },
-  "target_fps": 20,
-  "frame_interval_ms": 50,
+  "target_fps": 10,
+  "frame_interval_ms": 100,
   "num_hands": 1,
   "recommended_analysis_resolution": [
     320,
@@ -127,7 +127,7 @@
   "roi_size_ratio": 0.92,
   "camera_orientation": {
     "mirror_horizontal": false,
-    "direction_semantics": "unmirrored image coordinates; x decreases left and increases right"
+    "direction_semantics": "unmirrored NCM pixels with calibrated commands: positive index x maps to left and negative index x maps to right"
   },
   "hand_detection": {
     "running_mode": "VIDEO",
@@ -164,8 +164,8 @@
     "alpha": 0.45,
     "confidence_floor": 0.8,
     "probability_margin_floor": 0.18,
-    "known_mass_floor": 0.8,
-    "stable_frames_required": 5,
+    "known_mass_floor": 0.95,
+    "stable_frames_required": 3,
     "release_frames_required": 3,
     "minimum_hold_seconds": 0.18,
     "reject_label": "no_gesture"
@@ -175,7 +175,8 @@
     "minimum_axis_dominance": 0.78,
     "maximum_mean_non_index_finger_extension": 0.7,
     "hard_geometry_veto": true,
-    "horizontal_mirror": false
+    "horizontal_mirror": false,
+    "horizontal_semantic_swap": true
   },
   "dorsal_resolution": {
     "pose_score": 0.76,
@@ -205,7 +206,7 @@
       "validation_samples": 256,
       "prediction_agreement": 1.0,
       "maximum_absolute_probability_error": 1.0516972481777742e-07,
-      "mean_absolute_probability_error": 8.760839002067754e-10,
+      "mean_absolute_probability_error": 8.72931934948693e-10,
       "minimum_agreement": 0.99,
       "maximum_error_limit": 0.0001,
       "passed": true
@@ -242,5 +243,11 @@
       "down_recall": 0.9956331877729258,
       "down_as_dorsal_rate": 0.0
     }
+  },
+  "v18_20": {
+    "training_examples_per_class": 4096,
+    "internal_classes": 9,
+    "classifier_threads": 1,
+    "public_test_runtime_macro_f1": 0.9900694692254061
   }
 }

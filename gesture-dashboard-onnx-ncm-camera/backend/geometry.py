@@ -245,6 +245,22 @@ def zoom_pose_geometry(landmarks_xy: np.ndarray) -> dict[str, float | bool]:
     }
 
 
+def dorsal_geometry_support(geometry: dict) -> bool:
+    """Independent evidence for an unmistakable four-finger downward command.
+
+    More restrictive than the ordinary model-assisted dorsal validator. This
+    handles a camera-domain miss without weakening rejection for other shapes.
+    """
+    return bool(
+        geometry.get("score", 0) >= 0.90
+        and geometry.get("downward_finger_count", 0) == 4
+        and geometry.get("minimum_extension_score", 0) >= 0.80
+        and geometry.get("downward_score", 0) >= 0.90
+        and geometry.get("together_score", 0) >= 0.65
+        and geometry.get("parallel_score", 0) >= 0.90
+    )
+
+
 def _set_probability_floor(probabilities: np.ndarray, target_index: int, floor: float) -> np.ndarray:
     adjusted = np.asarray(probabilities, dtype=np.float64).copy()
     if adjusted[target_index] < floor:
@@ -281,17 +297,45 @@ class GeometryResolver:
             finger_extension_score(points, 17, 18, 19, 20),
         ], dtype=np.float32)
         dominance = float(np.max(np.abs(vector)) / norm)
-        directional = bool(
+        strict_pose = bool(
             pose_score >= 0.50
-            and dominance >= 0.78
             and float(non_index_extensions.mean()) <= 0.70
         )
         dx, dy = map(float, vector)
         gesture = (
             ("down" if dy > 0 else "up")
             if abs(dy) >= abs(dx)
-            else ("right" if dx > 0 else "left")
+            # NCM command calibration is horizontally inverted relative to the
+            # old source labels. This is a semantic swap, not an image mirror.
+            else ("left" if dx > 0 else "right")
         )
+        # Folded fingers can project as straight segments in a side view. Only
+        # relax their joint-angle check when the classifier agrees and the
+        # index is straight and clearly leads every other fingertip.
+        palm_scale = max(float(np.linalg.norm(points[9] - points[0])), 1e-6)
+        index_path = sum(
+            float(np.linalg.norm(points[joint + 1] - points[joint]))
+            for joint in (5, 6, 7)
+        )
+        index_straightness = norm / max(index_path, 1e-8)
+        index_lead = min(
+            float(np.dot(points[8] - points[tip], vector / norm) / palm_scale)
+            for tip in (12, 16, 20)
+        )
+        ordered = np.sort(probabilities)
+        model_agrees = bool(
+            raw == gesture
+            and float(ordered[-1]) >= self.config.confidence_floor
+            and float(ordered[-1] - ordered[-2]) >= self.config.probability_margin_floor
+        )
+        supported_pose = bool(
+            gesture in {"left", "right"}
+            and model_agrees
+            and finger_extension_score(points, 5, 6, 7, 8) >= 0.45
+            and index_straightness >= 0.80
+            and index_lead >= 0.20
+        )
+        directional = bool(dominance >= 0.78 and (strict_pose or supported_pose))
         details = {
             "valid": directional if raw in {"left", "right", "up", "down"} else True,
             "gesture": gesture,
@@ -299,11 +343,19 @@ class GeometryResolver:
             "axis_dominance": dominance,
             "maximum_non_index_extension": float(non_index_extensions.max()),
             "mean_non_index_extension": float(non_index_extensions.mean()),
+            "index_straightness": index_straightness,
+            "index_lead_ratio": index_lead,
+            "model_supported_pose": supported_pose,
             "horizontal_mirror": False,
+            "horizontal_semantic_swap": True,
         }
         if not directional:
             if raw in {"left", "right", "up", "down"}:
-                details["reason"] = "direction command does not have a clean single-index pose"
+                details["reason"] = (
+                    "Point more horizontally or vertically; the direction is diagonal"
+                    if dominance < 0.78 else
+                    "Extend the index finger past the other fingertips and hold the direction"
+                )
             return probabilities, details
         floor = min(0.98, 0.92 + 0.06 * max(0.0, pose_score - 0.72) / 0.28)
         details["valid"] = True
@@ -332,6 +384,7 @@ class GeometryResolver:
         extended_other_count = int((extensions[2:] >= 0.58).sum())
         gap = thumb_index_gap_ratio(points)
         dorsal = return_main_pose_geometry(points)
+        dorsal_supported = dorsal_geometry_support(dorsal)
         dorsal_valid = bool(
             dorsal["score"] >= 0.76
             and dorsal["downward_finger_count"] >= 4
@@ -347,6 +400,15 @@ class GeometryResolver:
             and float(non_thumb.mean()) <= 0.72
             and thumb_up_score >= 0.55
         )
+        # Side-view thumb-up poses have the same projected-finger ambiguity as
+        # Left/Right. Require a confident model and a thumb above all fingertips.
+        palm_scale = max(float(np.linalg.norm(points[9] - points[0])), 1e-6)
+        thumb_lead = float(min(points[tip, 1] - points[4, 1] for tip in (8, 12, 16, 20)) / palm_scale)
+        like_valid = like_valid or bool(
+            raw == "like" and float(adjusted.max()) >= 0.95
+            and extensions[0] >= 0.45 and thumb_up_score >= 0.50
+            and thumb_lead >= 0.20
+        )
         ok_valid = bool(
             gap <= 0.58
             and extended_other_count >= 2
@@ -360,7 +422,7 @@ class GeometryResolver:
         }
         # Geometry may safely resolve the two open-hand orientations even when
         # perspective causes the MLP to swap them.
-        if dorsal_valid and raw in {"open_palm", "dorsal", "down"}:
+        if dorsal_supported or (dorsal_valid and raw in {"open_palm", "dorsal", "down"}):
             adjusted = _set_probability_floor(
                 adjusted, self.config.class_to_idx["dorsal"], 0.96
             )
@@ -382,9 +444,11 @@ class GeometryResolver:
             "ring_extension": float(extensions[3]),
             "pinky_extension": float(extensions[4]),
             "thumb_up_score": thumb_up_score,
+            "thumb_lead_ratio": thumb_lead,
             "thumb_index_gap_ratio": gap,
             "extended_non_thumb_count": extended_non_thumb_count,
             "dorsal_score": float(dorsal["score"]),
+            "dorsal_geometry_supported": dorsal_supported,
             "downward_finger_count": int(dorsal["downward_finger_count"]),
         }
 
@@ -404,5 +468,6 @@ class GeometryResolver:
                 "valid": valid,
                 "reason": reason,
                 "gesture": resolved,
+                "geometry_supported": bool(resolved == "dorsal" and shape.get("dorsal_geometry_supported", False)),
             },
         }

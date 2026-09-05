@@ -1,0 +1,88 @@
+{
+  "public_validation_baseline": {
+    "raw_known_accuracy": 0.9866144302970944,
+    "raw_known_macro_f1": 0.9870239940877259,
+    "runtime_macro_f1": 0.9349178329702948,
+    "correct_command_rate": 0.9144629448253346,
+    "accepted_precision": 0.9946732954545454,
+    "unknown_false_accept_rate": 0.022,
+    "known_rejection_rate": 0.0842311459353575,
+    "known_mass_acceptance": 0.9265426052889324
+  },
+  "public_validation_v18_20": {
+    "raw_known_accuracy": 0.9996735226901731,
+    "raw_known_macro_f1": 0.999687499511718,
+    "runtime_macro_f1": 0.9884216507605833,
+    "correct_command_rate": 0.9859614756774404,
+    "accepted_precision": 0.9976874793524942,
+    "unknown_false_accept_rate": 0.006,
+    "known_rejection_rate": 0.012732615083251714,
+    "known_mass_acceptance": 0.9944498857329416
+  },
+  "legacy_validation_baseline": {
+    "raw_known_accuracy": 0.9935822637106184,
+    "raw_known_macro_f1": 0.9919971147161839,
+    "runtime_macro_f1": 0.9748136309388984,
+    "correct_command_rate": 0.9702450408401401,
+    "accepted_precision": 0.9869436201780415,
+    "unknown_false_accept_rate": 0.01675485008818342,
+    "known_rejection_rate": 0.028004667444574097,
+    "known_mass_acceptance": 0.9766627771295215
+  },
+  "legacy_validation_v18_20": {
+    "raw_known_accuracy": 0.9924154025670945,
+    "raw_known_macro_f1": 0.9906800222424984,
+    "runtime_macro_f1": 0.9756563140467678,
+    "correct_command_rate": 0.9731621936989499,
+    "accepted_precision": 0.984070796460177,
+    "unknown_false_accept_rate": 0.018518518518518517,
+    "known_rejection_rate": 0.023337222870478413,
+    "known_mass_acceptance": 0.9813302217036173
+  },
+  "public_test_baseline": {
+    "raw_known_accuracy": 0.9894602363462153,
+    "raw_known_macro_f1": 0.9896771216605779,
+    "runtime_macro_f1": 0.9438766831548979,
+    "correct_command_rate": 0.9290961354199936,
+    "accepted_precision": 0.9965741692360397,
+    "unknown_false_accept_rate": 0.02,
+    "known_rejection_rate": 0.07090386458000639,
+    "known_mass_acceptance": 0.937080804854679
+  },
+  "public_test_v18_20": {
+    "raw_known_accuracy": 0.9977642925582881,
+    "raw_known_macro_f1": 0.9978163722546598,
+    "runtime_macro_f1": 0.9900694692254061,
+    "correct_command_rate": 0.9878633024592782,
+    "accepted_precision": 0.999031007751938,
+    "unknown_false_accept_rate": 0.004,
+    "known_rejection_rate": 0.011817310763334398,
+    "known_mass_acceptance": 0.9932928776748643
+  },
+  "legacy_test_baseline": {
+    "raw_known_accuracy": 0.9915206331260599,
+    "raw_known_macro_f1": 0.9892799323293426,
+    "runtime_macro_f1": 0.9608321769760563,
+    "correct_command_rate": 0.9429055963821368,
+    "accepted_precision": 0.9881516587677726,
+    "unknown_false_accept_rate": 0.013961605584642234,
+    "known_rejection_rate": 0.054833239118145846,
+    "known_mass_acceptance": 0.9723007348784624
+  },
+  "legacy_test_v18_20": {
+    "raw_known_accuracy": 0.9875635952515546,
+    "raw_known_macro_f1": 0.9835896227227887,
+    "runtime_macro_f1": 0.9549486944633672,
+    "correct_command_rate": 0.9400791407574901,
+    "accepted_precision": 0.9811209439528024,
+    "unknown_false_accept_rate": 0.02443280977312391,
+    "known_rejection_rate": 0.05765969474279254,
+    "known_mass_acceptance": 0.9604296212549462
+  },
+  "classifier_latency": {
+    "p50_ms": 0.029399999675661093,
+    "p95_ms": 0.04460499992546829,
+    "p99_ms": 0.07074000037846413,
+    "note": "ONNX classifier only; full camera pipeline is benchmarked separately."
+  }
+}

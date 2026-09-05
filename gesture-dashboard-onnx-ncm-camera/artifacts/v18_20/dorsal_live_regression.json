@@ -1,0 +1,9 @@
+{
+  "case": "User-held Dorsal; captured target NCM camera frames",
+  "frames": 80,
+  "before_accepted_actions": 0,
+  "after_accepted_actions": 76,
+  "first_action_seconds": 0.4,
+  "evidence": "Replay of development case, not fresh live generalization accuracy",
+  "raw_classifier_known_mass": "Preserved; geometry supplied independent support"
+}

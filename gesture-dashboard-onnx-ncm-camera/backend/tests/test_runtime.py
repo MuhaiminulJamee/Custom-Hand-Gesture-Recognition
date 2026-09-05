@@ -1,9 +1,79 @@
+import asyncio
+
 import numpy as np
+import pytest
 
 from backend.config import RuntimeConfig
 from backend.model_runtime import InferenceEngine, ModelManager, RuntimeSession
 from backend.online_learning import OnlineLearningAdapter
-from backend.runtime import TemporalGate, probability_ema
+from backend.runtime import InferenceStartLimiter, TemporalGate, probability_ema
+
+
+def test_default_runtime_contract_is_backend_safe_ten_fps():
+    config = RuntimeConfig()
+
+    assert config.target_fps == 10.0
+    assert config.frame_interval_ms == 100
+    assert config.frame_budget_ms == 100.0
+    assert config.stable_frames_required == 3
+
+
+def test_inference_start_limiter_serializes_aggregate_starts_at_ten_fps():
+    now = 0.0
+    sleep_delays: list[float] = []
+
+    def clock() -> float:
+        return now
+
+    async def sleep(delay: float) -> None:
+        nonlocal now
+        sleep_delays.append(delay)
+        now += delay
+        await asyncio.sleep(0)
+
+    limiter = InferenceStartLimiter(100, clock=clock, sleep=sleep)
+
+    async def scenario() -> list[float]:
+        return list(
+            await asyncio.gather(
+                limiter.wait_for_start(),
+                limiter.wait_for_start(),
+                limiter.wait_for_start(),
+            )
+        )
+
+    starts = asyncio.run(scenario())
+
+    assert np.allclose(starts, [0.0, 0.1, 0.2])
+    assert np.allclose(sleep_delays, [0.1, 0.1])
+
+
+def test_inference_start_limiter_keeps_reservation_after_failure():
+    now = 5.0
+
+    def clock() -> float:
+        return now
+
+    async def sleep(delay: float) -> None:
+        nonlocal now
+        now += delay
+
+    # A faster requested interval is still clamped to the hard 10 FPS ceiling.
+    limiter = InferenceStartLimiter(1, clock=clock, sleep=sleep)
+
+    async def scenario() -> tuple[float, float]:
+        first = await limiter.wait_for_start()
+        try:
+            raise RuntimeError("simulated inference failure")
+        except RuntimeError:
+            pass
+        second = await limiter.wait_for_start()
+        return first, second
+
+    first, second = asyncio.run(scenario())
+
+    assert limiter.interval_seconds == 0.1
+    assert abs(second - first - 0.1) < 1e-12
 
 
 def test_probability_ema_keeps_rows_normalized():
@@ -21,13 +91,11 @@ def test_temporal_gate_requires_stability_confidence_margin_and_hold_time():
     row[config.class_to_idx["right"]] = 0.05
     first = gate.update(row, now=1.0)
     second = gate.update(row, now=1.1)
-    gate.update(row, now=1.2)
-    gate.update(row, now=1.3)
-    fifth = gate.update(row, now=1.4)
+    third = gate.update(row, now=1.2)
     assert first.execute is False
     assert second.execute is False
-    assert fifth.execute is True
-    assert fifth.predicted_gesture == "left"
+    assert third.execute is True
+    assert third.predicted_gesture == "left"
 
 
 def test_temporal_hold_time_handles_zero_timestamp():
@@ -69,6 +137,44 @@ def test_open_set_rejection_never_executes():
     assert decision.execute is False
     assert decision.predicted_gesture == "no_gesture"
     assert decision.reason == "outside the eight-gesture vocabulary"
+
+
+@pytest.mark.parametrize("fps", [5, 8, 10, 15, 20, 30, 60])
+def test_fast_frames_cannot_skip_hold_duration(fps):
+    gate = TemporalGate(RuntimeConfig())
+    row = np.zeros(8)
+    row[6] = 1.0
+    executed = []
+    for frame in range(fps + 1):
+        decision = gate.update(row, now=frame / fps)
+        if decision.execute:
+            executed.append(frame / fps)
+    assert executed
+    assert executed[0] >= gate.config.minimum_hold_seconds
+
+
+def test_confident_pose_transition_does_not_execute_stale_action():
+    gate = TemporalGate(RuntimeConfig())
+    left = np.eye(8)[0]
+    dorsal = np.eye(8)[6]
+    for now in (1.0, 1.1, 1.2):
+        decision = gate.update(left, now=now)
+    assert decision.execute
+    decision = gate.update(dorsal, now=1.3)
+    assert decision.predicted_gesture == "dorsal"
+    assert not decision.execute
+    assert decision.stable_frames == 1
+    assert not gate.update(dorsal, now=1.4).execute
+    assert gate.update(dorsal, now=1.5).execute
+
+
+def test_capture_outage_requires_new_confirmation():
+    gate = TemporalGate(RuntimeConfig())
+    for now in (1.0, 1.1, 1.2):
+        gate.update(np.eye(8)[6], now=now)
+    decision = gate.update(np.eye(8)[6], now=2.0)
+    assert not decision.execute
+    assert decision.stable_frames == 1
 
 
 def test_nonfinite_classifier_evidence_fails_closed():

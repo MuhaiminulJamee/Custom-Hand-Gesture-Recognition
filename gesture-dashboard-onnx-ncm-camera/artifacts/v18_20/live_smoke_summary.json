@@ -1,0 +1,12 @@
+{
+  "frames": 150,
+  "labelled_accuracy": "Not measured: no ground-truth labels supplied",
+  "pipeline_p50_ms": 16.788749999932406,
+  "pipeline_p95_ms": 18.646469999816873,
+  "pipeline_p99_ms": 27.339107999969062,
+  "over_100ms": 1,
+  "no_hand_frames": 0,
+  "inference_fps": 9.926709306391277,
+  "model": "v18_20",
+  "source": "Live NCM camera via local inference engine"
+}

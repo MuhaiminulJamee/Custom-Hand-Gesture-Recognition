@@ -1,9 +1,11 @@
 # Eight-Gesture Dashboard — ONNX + USB-NCM Board Camera
 
+Current release: **v18_20**. See [V18_20_README.md](V18_20_README.md) for current training data, notebook, metrics, and limitations. Prior-release statistics below are historical.
+
 This is the isolated development-board-camera edition of the gesture system. It
 uses an eight-output ONNX classifier, MediaPipe's 76-D hand feature pipeline,
 open-set rejection, geometry checks, temporal stability, safe reviewed online
-learning, and a 20 FPS application target. Frames come from the development
+learning, and a 10 FPS application target. Frames come from the development
 board rather than a browser webcam.
 
 The browser does **not** request webcam permission. The Python backend connects
@@ -70,13 +72,19 @@ It is emitted when no usable hand is present or when known-class confidence,
 probability margin, pose geometry, or temporal stability is insufficient. In
 the Feedback tab, choose it to mark a false detection or background frame.
 
-Left and Right use unmirrored camera coordinates: decreasing image x is Left
-and increasing image x is Right. The NCM preview, landmarks, feature extraction,
-direction resolver, and action demo must all remain unmirrored.
+The preview and inference pixels remain unmirrored. NCM horizontal calibration
+swaps the legacy source-camera Left/Right interpretation: decreasing image x is
+reported as Right and increasing image x is reported as Left, matching the
+front-facing operator's intended direction. The emitted semantic labels still
+map normally (`left` to Move Left and `right` to Move Right); no pixel flip is
+performed in the preview, landmarks, feature extraction, or action demo.
 
 ## Live stability and low-light handling
 
-The live pipeline is designed for the approximately 20 FPS NCM stream:
+The live pipeline uses a backend-wide hard cap of 10 inference starts per second,
+even if the NCM camera delivers frames faster or multiple clients are connected.
+Failed attempts also consume their slot. Its 100 ms frame budget leaves backend
+headroom while preserving the following stability controls:
 
 - MediaPipe runs in VIDEO mode with monotonic timestamps so its tracker can use
   frame-to-frame continuity.
@@ -88,7 +96,7 @@ The live pipeline is designed for the approximately 20 FPS NCM stream:
 - Directional, Dorsal, Like, OK, and Open Palm pose checks veto incompatible
   geometry before an action can fire.
 - The classifier uses known-gesture mass, a 0.80 confidence floor, a 0.18
-  probability-margin floor, five stable frames, three release frames, and an
+  probability-margin floor, three stable frames, three release frames, and an
   action cooldown. These gates intentionally prefer no action to a false action.
 
 These controls reduce jitter and false positives; they do not replace testing
@@ -192,7 +200,7 @@ In the dashboard:
 3. Select **Connect board camera**.
 4. Wait for state `Connected` and a rising frame count.
 5. Show a gesture and verify predictions, landmarks, EMA stability, actions, and
-   the 20 FPS capacity panel.
+   the 10 FPS capacity panel.
 6. Optionally upload a video of up to 60 seconds or an image and demonstrate the
    mapped gesture actions against it.
 
@@ -271,8 +279,8 @@ $env:NCM_ROTATE_180 = "false"
 ```
 
 The start script supplies the defaults when variables are not set. Horizontal
-mirroring is deliberately unsupported because it reverses the meaning of Left
-and Right.
+mirroring remains deliberately unsupported. Left/Right are corrected by the NCM
+semantic calibration, not by modifying camera pixels.
 
 ## Verification
 
@@ -285,11 +293,12 @@ Run the complete release checks:
 The JLIP parser tests cover fragmented packets, coalesced packets, stream
 resynchronization, CRC rejection, maximum payload enforcement, and network byte
 order. The automated model tests cover the exact eight-output contract,
-unmirrored source coordinates, preserved offline accuracy/open-set gates,
+unmirrored pixels, calibrated Left/Right semantics, preserved offline
+accuracy/open-set gates,
 low-light preprocessing, blank-frame suppression, landmark smoothing/jump
 handling, and guarded online learning.
 
-The current preserved offline evaluation reports 1,769 known-class samples and
+The pre-v18_20 preserved offline evaluation reported 1,769 known-class samples and
 1,146 held-out unknown samples: 99.15% known-class accuracy, 98.93% macro F1,
 97.47% minimum per-class F1, and 1.83% unknown false acceptance at the configured
 known-mass threshold. ONNX conversion parity is 100% on 256 preserved samples
@@ -301,8 +310,9 @@ gestures in normal and low light, with varied backgrounds, distances, left/right
 hands, skin tones, hand sizes, and finger thicknesses. Record per-class results
 and specifically challenge Left versus Right, Dorsal versus Down, Down versus
 non-command hand shapes, and empty-frame false positives. Confirm sustained
-approximately 20 FPS input, stable landmarks, action debounce, and zero transport
-errors during the run.
+approximately 10 FPS inference, a 100 ms processing budget, stable landmarks,
+action debounce, and zero transport errors during the run. The camera transport
+may report more than 10 FPS; the backend must still cap inference at 10 FPS.
 
 ## Model and security notes
 

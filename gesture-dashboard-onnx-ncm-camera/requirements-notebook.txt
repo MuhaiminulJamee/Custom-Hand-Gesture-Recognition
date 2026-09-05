@@ -1,0 +1,10 @@
+-r requirements-model-build.txt
+nbformat>=5.10,<6
+nbclient>=0.10,<1
+ipykernel>=6.29,<8
+ipywidgets>=8.1,<9
+pandas>=2.2,<4
+matplotlib>=3.9,<4
+remotezip==0.12.6
+requests>=2.32,<3
+threadpoolctl>=3.5,<4

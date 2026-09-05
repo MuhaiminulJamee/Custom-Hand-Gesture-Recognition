@@ -1,0 +1,7 @@
+{
+  "known_mass_floor": 0.95,
+  "confidence_floor": 0.8,
+  "probability_margin_floor": 0.18,
+  "source": "Settings fixed using public and legacy validation; test excluded from selection",
+  "model_sha256": "1aec12c072aa86e5f72de405ffba9f0914eb0a7939a19fcb069152b46931fc95"
+}

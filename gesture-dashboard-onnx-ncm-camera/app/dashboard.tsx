@@ -286,8 +286,9 @@ export default function Dashboard() {
   const actionToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recordingFrameTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const recordingStreamRef = useRef<MediaStream | null>(null);
+  const cameraStartPendingRef = useRef(false);
 
-  const targetFps = health?.config.target_fps ?? 20;
+  const targetFps = health?.config.target_fps ?? 10;
   const frameBudgetMs = health?.config.frame_budget_ms ?? prediction.timing?.frame_budget_ms ?? (1000 / targetFps);
   const stableRequired = health?.config.stable_frames_required ?? 3;
   const classNames = DEFAULT_CLASSES;
@@ -421,6 +422,7 @@ export default function Dashboard() {
   useEffect(() => { drawLandmarks(prediction.landmarks); }, [prediction.landmarks, activeTab, drawLandmarks]);
 
   const stopCamera = (preservePrediction = false) => {
+    cameraStartPendingRef.current = false;
     socketRef.current?.close();
     socketRef.current = null;
     void fetch(`${API_URL}/api/ncm/disconnect`, { method: 'POST' }).finally(refreshServerData);
@@ -434,7 +436,8 @@ export default function Dashboard() {
   });
 
   const startCamera = async () => {
-    if (cameraActive) return;
+    if (cameraActive || cameraStartPendingRef.current || socketRef.current) return;
+    cameraStartPendingRef.current = true;
     setConnection('connecting');
     setPrediction({
       status: 'starting',
@@ -450,6 +453,7 @@ export default function Dashboard() {
       const socket = new WebSocket(`${WS_URL}/ws/ncm-live`);
       socketRef.current = socket;
       socket.onopen = () => {
+        cameraStartPendingRef.current = false;
         setConnection('online');
         setCameraActive(true);
         if (selectedModel) socket.send(JSON.stringify({ type: 'select_model', model: selectedModel }));
@@ -480,9 +484,21 @@ export default function Dashboard() {
           setPrediction({ status: 'error', message: message.message });
         }
       };
-      socket.onerror = () => setPrediction({ status: 'error', message: 'The NCM inference WebSocket could not be reached.' });
-      socket.onclose = () => { setConnection('offline'); setCameraActive(false); };
+      socket.onerror = () => {
+        cameraStartPendingRef.current = false;
+        setConnection('offline');
+        setCameraActive(false);
+        setPrediction({ status: 'error', message: 'The NCM inference WebSocket could not be reached.' });
+        socket.close();
+      };
+      socket.onclose = () => {
+        if (socketRef.current === socket) socketRef.current = null;
+        cameraStartPendingRef.current = false;
+        setConnection('offline');
+        setCameraActive(false);
+      };
     } catch (error) {
+      cameraStartPendingRef.current = false;
       stopCameraRef.current();
       setPrediction({
         status: 'camera_error',
@@ -492,6 +508,7 @@ export default function Dashboard() {
   };
 
   const toggleCamera = () => {
+    if (cameraStartPendingRef.current || connection === 'connecting') return;
     if (cameraActive) stopCameraRef.current();
     else void startCamera();
   };
@@ -968,8 +985,8 @@ export default function Dashboard() {
                 <input type="file" accept="image/*" onChange={predictUploadedImage} disabled={uploading || !serverReady} />
               </label>
               <button className="secondary-button" type="button" onClick={resetSession}>Reset</button>
-              <button className="primary-button" type="button" onClick={toggleCamera} disabled={!serverReady}>
-                {cameraActive ? 'Disconnect board camera' : 'Connect board camera'}
+              <button className="primary-button" type="button" onClick={toggleCamera} disabled={!serverReady || connection === 'connecting'}>
+                {connection === 'connecting' ? 'Connecting…' : cameraActive ? 'Disconnect board camera' : 'Connect board camera'}
               </button>
             </div>
           </div>
@@ -1074,7 +1091,7 @@ export default function Dashboard() {
               </div>
               <div className="camera-footer">
                 <span>{demoVideo ? `Target ${demoTransform.scale.toFixed(1)}x · X ${demoTransform.x} · Y ${demoTransform.y}` : prediction.status === 'predicted' ? 'ONNX Runtime · CPU' : humanize(prediction.status)}</span>
-                <span>Unmirrored NCM camera {fps(cameraFps)} FPS · inference capped at {targetFps.toFixed(0)} FPS</span>
+                <span>Unmirrored NCM camera · calibrated Left/Right · {fps(cameraFps)} FPS · inference capped at {targetFps.toFixed(0)} FPS</span>
               </div>
               {demoVideo && <div className="demo-action-console">
                 <div className="demo-console-summary">
@@ -1193,8 +1210,8 @@ export default function Dashboard() {
             <div><p className="eyebrow">GUARDED ONLINE LEARNING</p><h2>Correct, capture, and safely learn</h2></div>
             <div className="feedback-heading-actions">
               <span className="count-pill">{feedbackCount} reviewed samples</span>
-              <button className="primary-button" type="button" onClick={toggleCamera} disabled={!serverReady}>
-                {cameraActive ? 'Disconnect board camera' : 'Connect board camera'}
+              <button className="primary-button" type="button" onClick={toggleCamera} disabled={!serverReady || connection === 'connecting'}>
+                {connection === 'connecting' ? 'Connecting…' : cameraActive ? 'Disconnect board camera' : 'Connect board camera'}
               </button>
             </div>
           </div>
@@ -1218,7 +1235,7 @@ export default function Dashboard() {
                   </div>}
                 </div>
               </div>
-              <div className="camera-footer"><span>Unmirrored preview + live landmarks</span><span>{connection === 'online' ? 'Feedback capture ready' : 'Connect to capture'}</span></div>
+              <div className="camera-footer"><span>Unmirrored preview + calibrated Left/Right + live landmarks</span><span>{connection === 'online' ? 'Feedback capture ready' : 'Connect to capture'}</span></div>
               <div className="feedback-prediction"><p>The system predicted</p><strong>{humanize(feedbackPrediction)}</strong><span>{percent(prediction.confidence)} confidence · {prediction.stable_frames ?? 0}/{stableRequired} stable</span></div>
               <div className="feedback-note"><strong>Safe Learn is guarded</strong><p>Each confirmed sample includes the current snapshot, landmarks, and feature vector. The server validates an online candidate before accepting it and keeps the deployed model when validation fails.</p></div>
               <div className="online-status-grid">

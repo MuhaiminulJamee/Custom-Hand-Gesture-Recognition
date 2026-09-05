@@ -24,7 +24,8 @@
 - Confirm artifact integrity and the release fingerprint pass.
 - Confirm the ONNX session exposes one `[N, 76]` float32 input, eight
   probabilities in the canonical order, and one `[N, 1]` known-mass output.
-- Confirm the runtime target is 20 FPS with a 50 ms frame budget.
+- Confirm the runtime target is 10 FPS with a 100 ms frame budget, even when the
+  board camera delivers frames faster.
 - Run the exact-class/open-set accuracy test and record its result.
 - Run camera-stability tests covering unmirrored pixels, low-light enhancement,
   near-blank rejection, VIDEO timestamps, landmark EMA, jump rejection, and
@@ -49,10 +50,12 @@ Hardware acceptance is separate and mandatory:
 2. Run `check_ncm_link.bat`; retain the host, adapter, ARP/neighbor, and TCP
    results.
 3. Start the dashboard, run UDP discovery, connect the camera, and confirm a
-   rising frame count near 20 FPS.
-4. Confirm the preview and landmarks are unmirrored. An index finger pointing
-   toward decreasing image x must produce Left; increasing image x must produce
-   Right.
+   rising frame count. Camera transport FPS may exceed the inference limit.
+4. Confirm the preview and landmarks are unmirrored while inference remains
+   capped at 10 FPS. For the front-facing NCM calibration, an index finger
+   pointing toward decreasing image x must produce Right; increasing image x
+   must produce Left. Confirm those semantic labels still dispatch Move Right
+   and Move Left, respectively.
 5. Collect a labeled live test for all eight gestures in normal and low light,
    across varied backgrounds, distances, skin tones, hand sizes, and finger
    thicknesses. Use both hands if both are within product scope.

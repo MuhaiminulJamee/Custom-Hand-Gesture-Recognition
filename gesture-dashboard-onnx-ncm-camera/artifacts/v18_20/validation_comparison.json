@@ -1,0 +1,38 @@
+{
+  "public_validation_baseline": {
+    "raw_known_accuracy": 0.9866144302970944,
+    "raw_known_macro_f1": 0.9870239940877259,
+    "runtime_macro_f1": 0.9310103398419545,
+    "correct_command_rate": 0.9085863532484493,
+    "accepted_precision": 0.9953505007153076,
+    "unknown_false_accept_rate": 0.018,
+    "known_rejection_rate": 0.0901077375122429
+  },
+  "public_validation_candidate": {
+    "raw_known_accuracy": 0.9996735226901731,
+    "raw_known_macro_f1": 0.999687499511718,
+    "runtime_macro_f1": 0.9838580085340214,
+    "correct_command_rate": 0.979758406790728,
+    "accepted_precision": 0.998004655803126,
+    "unknown_false_accept_rate": 0.004,
+    "known_rejection_rate": 0.018935683969964087
+  },
+  "legacy_validation_baseline": {
+    "raw_known_accuracy": 0.9935822637106184,
+    "raw_known_macro_f1": 0.9919971147161839,
+    "runtime_macro_f1": 0.9725788330341929,
+    "correct_command_rate": 0.9667444574095683,
+    "accepted_precision": 0.9880739415623137,
+    "unknown_false_accept_rate": 0.014991181657848324,
+    "known_rejection_rate": 0.03150525087514586
+  },
+  "legacy_validation_candidate": {
+    "raw_known_accuracy": 0.9924154025670945,
+    "raw_known_macro_f1": 0.9906800222424984,
+    "runtime_macro_f1": 0.9708308592232159,
+    "correct_command_rate": 0.9731621936989499,
+    "accepted_precision": 0.9771528998242531,
+    "unknown_false_accept_rate": 0.0291005291005291,
+    "known_rejection_rate": 0.023337222870478413
+  }
+}

@@ -109,7 +109,8 @@ def test_landmark_filter_reduces_stationary_jitter_and_is_session_local() -> Non
     assert initial is not None and smoothed is not None and independent is not None
     assert initial_quality["reason"] == "filter_initialized"
     assert quality["reason"] == "adaptively_smoothed"
-    assert 0.18 <= quality["smoothing_alpha"] < 1.0
+    # At 20 FPS the per-frame weight is lower to retain the 10 FPS time constant.
+    assert 0.09 <= quality["smoothing_alpha"] < 0.18
     assert np.linalg.norm(smoothed - initial) < np.linalg.norm(jitter)
     assert np.allclose(independent, base + jitter)
     assert independent_quality["reason"] == "filter_initialized"

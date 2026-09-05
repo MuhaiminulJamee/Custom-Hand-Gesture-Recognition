@@ -1,12 +1,67 @@
 from __future__ import annotations
 
+import asyncio
 from collections import deque
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+import math
 import time
 
 import numpy as np
 
 from .config import RuntimeConfig
+
+
+class InferenceStartLimiter:
+    """Serialize backend-wide inference starts without locking model execution."""
+
+    HARD_MAXIMUM_FPS = 10.0
+
+    def __init__(
+        self,
+        frame_interval_ms: float,
+        *,
+        clock: Callable[[], float] = time.perf_counter,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    ) -> None:
+        self._clock = clock
+        self._sleep = sleep
+        self._lock = asyncio.Lock()
+        self._last_start_at: float | None = None
+        self._interval_seconds = self._effective_interval(frame_interval_ms)
+
+    @classmethod
+    def _effective_interval(cls, frame_interval_ms: float) -> float:
+        requested_seconds = float(frame_interval_ms) / 1000.0
+        if not math.isfinite(requested_seconds) or requested_seconds <= 0.0:
+            raise ValueError("Inference frame interval must be a positive finite value.")
+        return max(requested_seconds, 1.0 / cls.HARD_MAXIMUM_FPS)
+
+    @property
+    def interval_seconds(self) -> float:
+        return self._interval_seconds
+
+    async def configure(self, frame_interval_ms: float) -> None:
+        """Apply a new interval while retaining the last admitted start time."""
+
+        interval_seconds = self._effective_interval(frame_interval_ms)
+        async with self._lock:
+            self._interval_seconds = interval_seconds
+
+    async def wait_for_start(self) -> float:
+        """Wait for and record the next globally admissible inference start."""
+
+        async with self._lock:
+            if self._last_start_at is not None:
+                earliest_start = self._last_start_at + self._interval_seconds
+                while True:
+                    remaining = earliest_start - self._clock()
+                    if remaining <= 0.0:
+                        break
+                    await self._sleep(remaining)
+            started_at = self._clock()
+            self._last_start_at = started_at
+            return started_at
 
 
 def probability_ema(probability_rows: np.ndarray, alpha: float = 0.65) -> np.ndarray:
@@ -62,12 +117,14 @@ class TemporalGate:
     _label_started_at: float | None = None
     _last_label: str | None = None
     _rejected_frames: int = 0
+    _last_update_at: float | None = None
 
     def reset(self) -> None:
         self._history.clear()
         self._label_started_at = None
         self._last_label = None
         self._rejected_frames = 0
+        self._last_update_at = None
 
     def reject(
         self,
@@ -81,6 +138,7 @@ class TemporalGate:
         self._history.clear()
         self._label_started_at = None
         self._last_label = None
+        self._last_update_at = None
         values = (
             np.asarray(probabilities, dtype=np.float64).reshape(-1)
             if probabilities is not None
@@ -115,6 +173,7 @@ class TemporalGate:
         known_gesture_mass: float = 1.0,
         pose_valid: bool = True,
         rejection_reason: str | None = None,
+        geometry_supported: bool = False,
     ) -> TemporalDecision:
         now = time.monotonic() if now is None else float(now)
         row = np.asarray(probabilities, dtype=np.float64).reshape(-1)
@@ -139,7 +198,8 @@ class TemporalGate:
                 probabilities=row,
                 known_gesture_mass=known_gesture_mass,
             )
-        if known_gesture_mass < self.config.known_mass_floor:
+        dorsal_fallback = bool(geometry_supported and self.config.class_names[int(row.argmax())] == "dorsal")
+        if known_gesture_mass < self.config.known_mass_floor and not dorsal_fallback:
             return self.reject(
                 "outside the eight-gesture vocabulary",
                 probabilities=row,
@@ -157,6 +217,16 @@ class TemporalGate:
                 probabilities=row,
                 known_gesture_mass=known_gesture_mass,
             )
+        # Start a fresh hold for a confident pose change or capture outage;
+        # the previous EMA must never execute an action for the new pose.
+        if self._history and (
+            int(self._history[-1].argmax()) != int(row.argmax())
+            or (self._last_update_at is not None and now - self._last_update_at >= 0.5)
+        ):
+            self.reset()
+        if self._last_update_at is not None and now <= self._last_update_at:
+            return self.reject("duplicate or out-of-order frame timestamp")
+        self._last_update_at = now
         self._rejected_frames = 0
         self._history.append(row)
         ema_rows = probability_ema(np.vstack(self._history), self.config.ema_alpha)
@@ -174,6 +244,8 @@ class TemporalGate:
         )
         held_seconds = max(0.0, now - label_started_at)
         required_hold = self.config.minimum_hold_seconds
+        if dorsal_fallback and known_gesture_mass < self.config.known_mass_floor:
+            required_hold = max(required_hold, 0.35)
         execute = bool(
             confidence >= self.config.confidence_floor
             and stable_frames >= self.config.stable_frames_required
@@ -186,7 +258,7 @@ class TemporalGate:
         elif held_seconds < required_hold:
             reason = "gesture hold requirement not reached"
         else:
-            reason = "stable and confident"
+            reason = "stable Dorsal geometry" if dorsal_fallback and known_gesture_mass < self.config.known_mass_floor else "stable and confident"
         return TemporalDecision(
             execute=execute,
             predicted_gesture=gesture,
