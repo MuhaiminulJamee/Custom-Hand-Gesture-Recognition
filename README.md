@@ -9,6 +9,7 @@ the MediaPipe hand-gesture recognition system.
 |---|---|---|
 | [`gesture-dashboard-onnx`](gesture-dashboard-onnx/) | MediaPipe + ONNX Runtime | Available |
 | [`gesture-dashboard-joblib`](gesture-dashboard-joblib/) | MediaPipe + Python/Joblib | Available |
+| [`gesture-dashboard-onnx-ncm-camera`](gesture-dashboard-onnx-ncm-camera/) | MediaPipe + ONNX Runtime + USB-NCM/JLIP board camera | Available; physical-board validation required |
 
 Each edition is self-contained and has its own setup instructions, dependencies,
 runtime artifacts, tests, and documentation.
@@ -44,3 +45,18 @@ classifier.
 
 See [`gesture-dashboard-joblib/README.md`](gesture-dashboard-joblib/README.md) for
 complete setup, model-safety, testing, and production instructions.
+
+## Run the ONNX USB-NCM board-camera edition
+
+```powershell
+cd gesture-dashboard-onnx-ncm-camera
+.\setup_ncm_onnx_dashboard.bat
+.\check_ncm_link.bat
+.\start_ncm_onnx_dashboard.bat
+```
+
+Then open <http://127.0.0.1:3200>. This edition connects to the development board
+at `192.168.50.2:5000` from the Windows NCM interface `192.168.50.1/30`; it does
+not use browser webcam capture. See
+[`gesture-dashboard-onnx-ncm-camera/README.md`](gesture-dashboard-onnx-ncm-camera/README.md)
+for the JLIP protocol, firmware diagnostics, and operating instructions.
