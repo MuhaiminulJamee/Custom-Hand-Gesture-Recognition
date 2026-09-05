@@ -31,27 +31,20 @@ def _environment_integer(name: str, default: int, minimum: int, maximum: int) ->
     return value
 
 CLASS_NAMES = [
-    "call", "rock", "like", "ok", "one", "one_down", "one_left",
-    "one_right", "palm", "peace", "dorsal_hand", "fist", "zoom_in",
-    "zoom_out", "no_gesture",
+    "left", "right", "up", "down", "open_palm", "like", "dorsal", "ok",
 ]
+REJECT_LABEL = "no_gesture"
+FEEDBACK_LABELS = [*CLASS_NAMES, REJECT_LABEL]
 
 GESTURE_TO_ACTION = {
-    "call": "Detect My Face",
-    "rock": "Pause Video",
-    "like": "Stop / Continue",
-    "ok": "Start Recording",
-    "one": "Move Up",
-    "one_down": "Move Down",
-    "one_left": "Move Left",
-    "one_right": "Move Right",
-    "palm": "Open Palm",
-    "peace": "End Recording",
-    "dorsal_hand": "Return to Main Position",
-    "fist": "Fist (Follow Object phase)",
-    "zoom_in": "Zoom In",
-    "zoom_out": "Zoom Out",
-    "no_gesture": "No Gesture",
+    "left": "Move Left",
+    "right": "Move Right",
+    "up": "Move Up",
+    "down": "Move Down",
+    "open_palm": "Enable / Disable Object Tracking",
+    "like": "Play / Pause",
+    "dorsal": "Return to Default Position",
+    "ok": "Start / Stop Recording",
 }
 
 FEATURE_NAMES = (
@@ -144,7 +137,7 @@ def load_production_settings() -> ProductionSettings:
         minimum_per_class_f1=float(
             os.getenv("GESTURE_MINIMUM_PER_CLASS_F1", "0.80")
         ),
-        deferred_quality_classes=("no_gesture",),
+        deferred_quality_classes=(),
         log_directory=log_directory,
     )
 
@@ -156,11 +149,16 @@ class RuntimeConfig:
         default_factory=lambda: GESTURE_TO_ACTION.copy()
     )
     feature_names: list[str] = field(default_factory=lambda: FEATURE_NAMES.copy())
-    target_fps: float = 10.0
-    ema_alpha: float = 0.65
-    confidence_floor: float = 0.70
-    stable_frames_required: int = 3
-    zoom_hold_seconds: float = 1.0
+    feedback_labels: list[str] = field(default_factory=lambda: FEEDBACK_LABELS.copy())
+    reject_label: str = REJECT_LABEL
+    target_fps: float = 20.0
+    ema_alpha: float = 0.45
+    confidence_floor: float = 0.80
+    probability_margin_floor: float = 0.18
+    known_mass_floor: float = 0.80
+    stable_frames_required: int = 5
+    release_frames_required: int = 3
+    minimum_hold_seconds: float = 0.18
     action_cooldown_seconds: float = 0.80
     follow_timeout_seconds: float = 20.0
     follow_hold_seconds: float = 2.5
@@ -189,6 +187,8 @@ class RuntimeConfig:
     def public_dict(self) -> dict[str, Any]:
         return {
             "class_names": self.class_names,
+            "feedback_labels": self.feedback_labels,
+            "reject_label": self.reject_label,
             "gesture_to_action": self.gesture_to_action,
             "feature_count": len(self.feature_names),
             "target_fps": self.target_fps,
@@ -196,8 +196,11 @@ class RuntimeConfig:
             "frame_budget_ms": self.frame_budget_ms,
             "ema_alpha": self.ema_alpha,
             "confidence_floor": self.confidence_floor,
+            "probability_margin_floor": self.probability_margin_floor,
+            "known_mass_floor": self.known_mass_floor,
             "stable_frames_required": self.stable_frames_required,
-            "zoom_hold_seconds": self.zoom_hold_seconds,
+            "release_frames_required": self.release_frames_required,
+            "minimum_hold_seconds": self.minimum_hold_seconds,
             "action_cooldown_seconds": self.action_cooldown_seconds,
             "follow_timeout_seconds": self.follow_timeout_seconds,
             "follow_hold_seconds": self.follow_hold_seconds,
@@ -209,7 +212,7 @@ class RuntimeConfig:
             "model_format": self.model_format,
             "selected_model_name": self.selected_model_name,
             "zoom_gap_calibration": self.zoom_gap_calibration,
-            "follow_object_sequence": ["palm", "fist", "palm"],
+            "follow_object_sequence": ["open_palm"],
             "follow_object_base_models": ["ONNX"],
         }
 
@@ -225,25 +228,41 @@ def load_runtime_config(models_directory: Path = MODELS_DIRECTORY) -> RuntimeCon
     path = models_directory / "gesture_mobile_runtime_config.json"
     data = _read_json(path)
     smoothing = data.get("temporal_smoothing", {})
-    zoom = data.get("zoom_resolution", {})
     class_names = list(data.get("class_names") or CLASS_NAMES)
     if class_names != CLASS_NAMES:
         raise ValueError(
-            "Runtime configuration class order does not match the notebook's "
-            f"15-class taxonomy: {class_names}"
+            "Runtime configuration class order does not match the eight-command "
+            f"taxonomy: {class_names}"
         )
     feature_names = list(data.get("feature_names") or FEATURE_NAMES)
     if feature_names != FEATURE_NAMES:
         raise ValueError("Runtime configuration does not contain the exact 76-D feature order.")
+    feedback_labels = list(data.get("feedback_labels") or FEEDBACK_LABELS)
+    if feedback_labels != FEEDBACK_LABELS:
+        raise ValueError("Feedback labels must contain the eight commands plus no_gesture.")
+    reject_label = str(data.get("reject_label", REJECT_LABEL))
+    if reject_label != REJECT_LABEL:
+        raise ValueError("The runtime rejection label must be no_gesture.")
+    gesture_to_action = dict(data.get("gesture_to_action") or GESTURE_TO_ACTION)
+    if gesture_to_action != GESTURE_TO_ACTION:
+        raise ValueError("Gesture actions do not match the eight-command release contract.")
     return RuntimeConfig(
         class_names=class_names,
-        gesture_to_action=dict(data.get("gesture_to_action") or GESTURE_TO_ACTION),
+        gesture_to_action=gesture_to_action,
         feature_names=feature_names,
-        target_fps=float(data.get("target_fps", 10.0)),
-        ema_alpha=float(smoothing.get("alpha", 0.65)),
-        confidence_floor=float(smoothing.get("confidence_floor", 0.70)),
-        stable_frames_required=int(smoothing.get("stable_frames_required", 3)),
-        zoom_hold_seconds=float(zoom.get("hold_seconds", 1.0)),
+        feedback_labels=feedback_labels,
+        reject_label=reject_label,
+        target_fps=float(data.get("target_fps", 20.0)),
+        ema_alpha=float(smoothing.get("alpha", 0.45)),
+        confidence_floor=float(smoothing.get("confidence_floor", 0.80)),
+        probability_margin_floor=float(
+            smoothing.get("probability_margin_floor", 0.18)
+        ),
+        known_mass_floor=float(smoothing.get("known_mass_floor", 0.80)),
+        stable_frames_required=int(smoothing.get("stable_frames_required", 5)),
+        release_frames_required=int(smoothing.get("release_frames_required", 3)),
+        minimum_hold_seconds=float(smoothing.get("minimum_hold_seconds", 0.18)),
+        action_cooldown_seconds=float(data.get("action_cooldown_seconds", 0.80)),
         follow_timeout_seconds=float(
             data.get("follow_object_step_timeout_seconds", 20.0)
         ),

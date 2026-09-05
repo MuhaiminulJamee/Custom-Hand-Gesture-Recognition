@@ -1,10 +1,7 @@
 {
+  "schema_version": 2,
   "model_file": "gesture_mlp_production.onnx",
-  "model_format": "ONNX float32 via ONNX Runtime CPUExecutionProvider",
-  "weight_precision": "float32_fallback",
-  "mobile_classifier": "ONNX",
-  "validation_selected_primary_model": "ONNX",
-  "primary_joblib_file": "gesture_primary_model.joblib",
+  "model_format": "ONNX float32, eight command outputs plus open-set score",
   "input_shape": [
     1,
     76
@@ -89,186 +86,161 @@
     "thumb_reach_ratio"
   ],
   "class_names": [
-    "call",
-    "rock",
+    "left",
+    "right",
+    "up",
+    "down",
+    "open_palm",
     "like",
+    "dorsal",
+    "ok"
+  ],
+  "reject_label": "no_gesture",
+  "feedback_labels": [
+    "left",
+    "right",
+    "up",
+    "down",
+    "open_palm",
+    "like",
+    "dorsal",
     "ok",
-    "one",
-    "one_down",
-    "one_left",
-    "one_right",
-    "palm",
-    "peace",
-    "dorsal_hand",
-    "fist",
-    "zoom_in",
-    "zoom_out",
     "no_gesture"
   ],
   "gesture_to_action": {
-    "call": "Detect My Face",
-    "rock": "Pause Video",
-    "like": "Stop / Continue",
-    "ok": "Start Recording",
-    "one": "Move Up",
-    "one_down": "Move Down",
-    "one_left": "Move Left",
-    "one_right": "Move Right",
-    "palm": "Open Palm",
-    "peace": "End Recording",
-    "dorsal_hand": "Return to Main Position",
-    "fist": "Fist (Follow Object phase)",
-    "zoom_in": "Zoom In",
-    "zoom_out": "Zoom Out",
-    "no_gesture": "No Gesture"
+    "left": "Move Left",
+    "right": "Move Right",
+    "up": "Move Up",
+    "down": "Move Down",
+    "open_palm": "Enable / Disable Object Tracking",
+    "like": "Play / Pause",
+    "dorsal": "Return to Default Position",
+    "ok": "Start / Stop Recording"
   },
-  "target_fps": 10,
-  "frame_interval_ms": 100,
+  "target_fps": 20,
+  "frame_interval_ms": 50,
   "num_hands": 1,
-  "classifier_threads": 1,
   "recommended_analysis_resolution": [
-    480,
-    360
+    320,
+    320
   ],
   "roi_size_ratio": 0.92,
-  "temporal_smoothing": {
-    "algorithm": "probability_ema",
-    "alpha": 0.65,
-    "confidence_floor": 0.7,
-    "stable_frames_required": 3,
-    "reject_class": "no_gesture"
+  "camera_orientation": {
+    "mirror_horizontal": false,
+    "direction_semantics": "unmirrored image coordinates; x decreases left and increases right"
   },
-  "return_main_resolution": {
-    "pose_score": 0.7,
-    "strong_geometry_score": 0.76,
-    "minimum_model_probability": 0.05,
-    "minimum_downward_fingers": 4,
-    "confidence_floor": 0.92
+  "hand_detection": {
+    "running_mode": "VIDEO",
+    "minimum_detection_confidence": 0.55,
+    "minimum_presence_confidence": 0.55,
+    "minimum_tracking_confidence": 0.6,
+    "minimum_hand_area_ratio": 0.018
+  },
+  "low_light_enhancement": {
+    "enabled": true,
+    "median_luma_trigger": 92.0,
+    "clahe_clip_limit_range": [
+      1.6,
+      2.4
+    ],
+    "gamma_range": [
+      0.55,
+      1.0
+    ],
+    "near_blank_mean_luma_maximum": 6.0
+  },
+  "landmark_smoothing": {
+    "algorithm": "velocity_adaptive_ema",
+    "stationary_alpha": 0.18,
+    "maximum_alpha": 0.72,
+    "motion_gain": 1.35,
+    "shape_jump_threshold": 0.62,
+    "centroid_jump_threshold": 1.2,
+    "persistent_jump_reacquire_frames": 2,
+    "missing_frames_before_reset": 3
+  },
+  "temporal_smoothing": {
+    "algorithm": "probability_ema_with_open_set_rejection",
+    "alpha": 0.45,
+    "confidence_floor": 0.8,
+    "probability_margin_floor": 0.18,
+    "known_mass_floor": 0.8,
+    "stable_frames_required": 5,
+    "release_frames_required": 3,
+    "minimum_hold_seconds": 0.18,
+    "reject_label": "no_gesture"
   },
   "directional_resolution": {
-    "pose_score": 0.72,
+    "pose_score": 0.5,
     "minimum_axis_dominance": 0.78,
-    "confidence_floor": 0.92,
-    "maximum_non_index_finger_extension": 0.55
+    "maximum_mean_non_index_finger_extension": 0.7,
+    "hard_geometry_veto": true,
+    "horizontal_mirror": false
   },
-  "zoom_gap_calibration": {
-    "normalization": "thumb tip (4) to index tip (8) / median palm reference",
-    "zoom_in_train_median": 1.3054274916648865,
-    "zoom_out_train_median": 0.34747037291526794,
-    "threshold": 0.8264489322900772,
-    "hysteresis_margin": 0.09579571187496186,
-    "lower_boundary": 0.7306532204151154,
-    "upper_boundary": 0.922244644165039,
-    "calibration_split": "train only",
-    "external_pinch": {
-      "normalization": "thumb tip to index tip / median palm reference",
-      "usable_samples": 1780,
-      "lower_quantile": 0.35,
-      "upper_quantile": 0.65,
-      "zoom_out_max_gap": 0.5637353807687759,
-      "zoom_in_min_gap": 0.9456738591194154,
-      "ambiguous_middle_discarded": 534
-    },
-    "static_endpoint_filter": "zoom_in >= train midpoint; zoom_out < train midpoint"
+  "dorsal_resolution": {
+    "pose_score": 0.76,
+    "minimum_downward_fingers": 4,
+    "minimum_extension_score": 0.5,
+    "hard_geometry_veto": true
   },
-  "zoom_resolution": {
-    "classes": [
-      "zoom_in",
-      "zoom_out"
-    ],
-    "no_gesture_rescue_minimum_probability": 0.1,
-    "confusion_rescue_minimum_probability": 0.02,
-    "directional_rescue_minimum_probability": 0.005,
-    "directional_rescue_minimum_thumb_opposition_score": 0.45,
-    "directional_rescue_minimum_pair_reach_score": 0.25,
-    "geometry_score": 0.6,
-    "model_veto_minimum_geometry_score": 0.48,
-    "model_veto_minimum_thumb_opposition_score": 0.18,
-    "runtime_confusion_classes": [
-      "no_gesture",
-      "one",
-      "one_down",
-      "one_left",
-      "one_right"
-    ],
-    "rotation_augmentation_degrees": [
-      -180.0,
-      180.0
-    ],
-    "confidence_floor": 0.9,
-    "hold_seconds": 1.0,
-    "static_definitions": {
-      "zoom_in": "thumb and index separated in the stable final pose",
-      "zoom_out": "thumb and index touching or nearly touching"
-    }
-  },
-  "follow_object": {
+  "pose_validation": {
     "enabled": true,
-    "mode": "opt_in_static_pose_sequence",
-    "sequence": [
-      "palm",
-      "fist",
-      "palm"
-    ],
-    "step_timeout_seconds": 20.0,
-    "fist_training_source": "HaGRID fist only",
-    "rock_training_source": "Kaggle RPS only",
-    "completion_action": "Follow Object"
+    "like_minimum_thumb_extension": 0.6,
+    "like_maximum_other_finger_extension": 0.58,
+    "ok_maximum_thumb_index_gap_ratio": 0.58,
+    "ok_minimum_extended_other_fingers": 2,
+    "open_palm_minimum_extended_fingers": 4
   },
-  "deployment_quality_gate": {
-    "minimum_per_class_f1": 0.8,
-    "passed": false,
-    "lowest_class": "zoom_out",
-    "lowest_class_f1": 0.7971014492753623
-  },
-  "tflite_validation": {
-    "samples": 256,
-    "selected_precision": "float32_fallback",
-    "float16_fallback_used": true,
-    "keras_transfer": {
-      "maximum_absolute_probability_error": 0.16572555899620056,
-      "mean_absolute_probability_error": 0.0002220672554026059,
-      "prediction_agreement": 0.99609375
-    },
-    "float16_attempt": {
-      "maximum_absolute_probability_error": 0.2846459150314331,
-      "mean_absolute_probability_error": 0.00038005318933896187,
-      "prediction_agreement": 0.99609375
-    },
-    "selected_export": {
-      "maximum_absolute_probability_error": 0.16572509706020355,
-      "mean_absolute_probability_error": 0.00022206361907893868,
-      "prediction_agreement": 0.99609375
-    }
-  },
-  "validation_macro_f1": 0.9462242091210429,
-  "gap_from_best_validation_model": 0.0005304593448970385,
-  "maximum_acceptable_macro_f1_gap": 0.02,
-  "integration_order": [
-    "MediaPipe Hand Landmarker LIVE_STREAM with num_hands=1",
-    "skip frames until frame_interval_ms has elapsed",
-    "build the exact 76-D feature vector including eight explicit hand-shape values",
-    "run the parity-qualified ONNX MLP through ONNX Runtime CPUExecutionProvider",
-    "apply directional, strict pinch-family zoom, and return-main resolvers",
-    "apply probability EMA with alpha=0.65 across consecutive frames",
-    "execute only above the confidence floor after three stable labels",
-    "when Follow Object mode is armed, consume palm then HaGRID fist then palm",
-    "never substitute the RPS rock class for the Follow Object fist step",
-    "require zoom_in/zoom_out to remain stable for one second before firing",
-    "apply EMA probabilities and require stable consecutive frames"
-  ],
+  "action_cooldown_seconds": 0.8,
   "online_learning": {
     "enabled": true,
-    "checkpoint_file": "gesture_online_state.joblib",
-    "latest_tflite_snapshot": "gesture_online_mlp_mobile.tflite",
-    "update_count": 51,
-    "exported_utc": "2026-08-30T11:08:36.672837+00:00",
-    "scaler_export_mode": "exact_elementwise",
-    "tflite_parity": {
-      "maximum_absolute_probability_error": 1.430511474609375e-06,
-      "mean_absolute_probability_error": 8.447550304605394e-09,
-      "p99_absolute_probability_error": 2.086162567138672e-07,
-      "prediction_agreement": 1.0
+    "mode": "validation_gated_numpy_residual_adapter",
+    "state_file": "gesture_online_adapter_state.npz",
+    "replay_cache_file": "gesture_online_replay_cache.npz",
+    "validation_cache_file": "gesture_online_validation_cache.npz",
+    "negative_feedback_label": "no_gesture"
+  },
+  "qualification": {
+    "parity": {
+      "validation_samples": 256,
+      "prediction_agreement": 1.0,
+      "maximum_absolute_probability_error": 1.0516972481777742e-07,
+      "mean_absolute_probability_error": 8.760839002067754e-10,
+      "minimum_agreement": 0.99,
+      "maximum_error_limit": 0.0001,
+      "passed": true
+    },
+    "test_metrics": {
+      "model": "EightGestureONNX",
+      "test_samples": 1769,
+      "accuracy": 0.9915206331260599,
+      "macro_f1": 0.9892799323293426,
+      "minimum_per_class_f1": 0.9747292418772563,
+      "known_mass_floor": 0.8,
+      "known_samples": 1769,
+      "unknown_samples": 1146,
+      "known_acceptance_rate": 0.9723007348784624,
+      "unknown_false_acceptance_rate": 0.01832460732984293,
+      "accepted_known_accuracy": 0.9959302325581395
+    },
+    "open_set": {
+      "known_mass_floor": 0.8,
+      "known_samples": 1769,
+      "unknown_samples": 1146,
+      "known_acceptance_rate": 0.9723007348784624,
+      "unknown_false_acceptance_rate": 0.01832460732984293,
+      "accepted_known_accuracy": 0.9959302325581395
+    },
+    "hard_cases": {
+      "rock_hard_negative_samples": 293,
+      "rock_false_acceptance_rate": 0.006825938566552901,
+      "rock_accepted_as_down_rate": 0.0,
+      "dorsal_samples": 427,
+      "dorsal_recall": 0.9976580796252927,
+      "dorsal_as_down_rate": 0.00234192037470726,
+      "down_samples": 229,
+      "down_recall": 0.9956331877729258,
+      "down_as_dorsal_rate": 0.0
     }
   }
 }

@@ -47,9 +47,9 @@ class FeedbackStore:
         self.images_directory.mkdir(parents=True, exist_ok=True)
 
     def save(self, feedback: FeedbackRecord) -> dict[str, Any]:
-        if feedback.actual_label not in self.config.class_names:
+        if feedback.actual_label not in self.config.feedback_labels:
             raise ValueError(f"Unknown actual label: {feedback.actual_label}")
-        if feedback.predicted_label not in self.config.class_names:
+        if feedback.predicted_label not in self.config.feedback_labels:
             raise ValueError(f"Unknown predicted label: {feedback.predicted_label}")
         if not np.isfinite(float(feedback.confidence)):
             raise ValueError("Feedback confidence must be finite.")
@@ -134,6 +134,9 @@ def artifact_status(models_directory: Path = MODELS_DIRECTORY) -> list[dict[str,
         ("Runtime configuration", "gesture_mobile_runtime_config.json", True),
         ("Qualified ONNX classifier", "gesture_mlp_production.onnx", True),
         ("ONNX parity metadata", "gesture_mlp_onnx_metadata.json", True),
+        ("Safe Learn replay cache", "gesture_online_replay_cache.npz", True),
+        ("Safe Learn validation cache", "gesture_online_validation_cache.npz", True),
+        ("Untouched release test cache", "gesture_online_untouched_test_cache.npz", True),
         ("Artifact integrity manifest", "gesture_artifact_manifest.json", True),
         ("Evaluation evidence", "*.csv", False),
     ]

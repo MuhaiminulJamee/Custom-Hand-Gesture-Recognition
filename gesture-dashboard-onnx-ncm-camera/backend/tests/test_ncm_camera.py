@@ -87,6 +87,15 @@ def test_packet_builder_uses_network_byte_order_and_crc32() -> None:
     assert fields[7] == 99
 
 
+def test_horizontal_mirroring_is_not_a_supported_camera_option(monkeypatch) -> None:
+    monkeypatch.setenv("NCM_MIRROR_HORIZONTAL", "true")
+
+    config = NcmCameraConfig.from_environment()
+
+    assert not hasattr(config, "mirror_horizontal")
+    assert "mirror_horizontal" not in config.public_dict()
+
+
 def test_udp_discovery_uses_expected_payload_and_returns_reply() -> None:
     server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     server.bind(("127.0.0.1", 0))

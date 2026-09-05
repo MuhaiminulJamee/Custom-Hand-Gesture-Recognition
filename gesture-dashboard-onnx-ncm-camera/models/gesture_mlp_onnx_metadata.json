@@ -1,5 +1,46 @@
 {
-  "created_utc": "2026-09-01T03:30:47.416807+00:00",
+  "schema_version": 2,
+  "created_utc": "2026-09-05T04:21:52.284577+00:00",
+  "format": "ONNX",
+  "model_name": "EightGestureMLP",
+  "onnx_file": "gesture_mlp_production.onnx",
+  "onnx_bytes": 79107,
+  "onnx_sha256": "faa40884add797e109ce5f2f702d3ab497175cb3a8270e51b1fc5cc78a4e732a",
+  "onnx_ir_version": 8,
+  "opsets": {
+    "ai.onnx": 16,
+    "ai.onnx.ml": 1
+  },
+  "input": {
+    "name": "landmark_features",
+    "dtype": "float32",
+    "shape": [
+      null,
+      76
+    ]
+  },
+  "probability_output": "probabilities",
+  "known_mass_output": "known_gesture_mass",
+  "output_class_order": [
+    "left",
+    "right",
+    "up",
+    "down",
+    "open_palm",
+    "like",
+    "dorsal",
+    "ok"
+  ],
+  "source_class_mapping": {
+    "left": "one_left",
+    "right": "one_right",
+    "up": "one",
+    "down": "one_down",
+    "open_palm": "palm",
+    "like": "like",
+    "dorsal": "dorsal_hand",
+    "ok": "ok"
+  },
   "feature_names": [
     "landmark_0_x",
     "landmark_0_y",
@@ -78,88 +119,51 @@
     "thumb_tip_index_mcp_ratio",
     "thumb_reach_ratio"
   ],
-  "format": "ONNX",
-  "input": {
-    "dtype": "float32",
-    "name": "landmark_features",
-    "shape": [
-      null,
-      76
-    ]
-  },
-  "model_name": "MLP",
-  "onnx_bytes": 78511,
-  "onnx_file": "gesture_mlp_production.onnx",
-  "onnx_ir_version": 8,
-  "onnx_sha256": "e0600df46db4be4c5dbe4ae26a3b376ca8435abaf3dea18768b37ea4703ae117",
-  "opsets": {
-    "ai.onnx": 16,
-    "ai.onnx.ml": 1
-  },
-  "output_class_order": [
-    "call",
-    "rock",
-    "like",
-    "ok",
-    "one",
-    "one_down",
-    "one_left",
-    "one_right",
-    "palm",
-    "peace",
-    "dorsal_hand",
-    "fist",
-    "zoom_in",
-    "zoom_out",
-    "no_gesture"
-  ],
   "parity": {
-    "maximum_absolute_probability_error": 1.3113021850585938e-06,
-    "maximum_error_limit": 0.0001,
-    "mean_absolute_probability_error": 3.4737246771092797e-09,
-    "minimum_agreement": 0.99,
-    "passed": true,
+    "validation_samples": 256,
     "prediction_agreement": 1.0,
-    "validation_samples": 256
+    "maximum_absolute_probability_error": 1.0516972481777742e-07,
+    "mean_absolute_probability_error": 8.760839002067754e-10,
+    "minimum_agreement": 0.99,
+    "maximum_error_limit": 0.0001,
+    "passed": true
   },
-  "runtime_note": "Input must be the same 76-D MediaPipe feature vector used by the Windows model. Geometry resolution, EMA, and Follow Object remain application logic.",
-  "schema_version": 1,
-  "source_selection": {
-    "deferred_classes": [
-      "no_gesture"
-    ],
-    "pc_release_ready": true,
-    "qualified_utc": "2026-08-31T10:10:03.838264+00:00",
-    "schema_version": 1,
-    "selected_model": "MLP",
-    "selection_basis": {
-      "metric": "gated_macro_f1",
-      "near_tie_preference": [
-        "MLP",
-        "OnlineMLP",
-        "SVM"
-      ],
-      "near_tie_tolerance": 0.002,
-      "split": "validation",
-      "untouched_test_used_for_selection": false
-    },
-    "sources": {
-      "model_file": "mediapipe_hagrid_rps_pinch15_hagrid_fist_follow_object_models.joblib",
-      "model_sha256": "412446dbbbdea0f80e8b46754742a4ae1e1f7fab92291f7e39b77d202be58d80",
-      "test_cache_file": "gesture_online_untouched_test_cache.npz",
-      "test_cache_sha256": "202291e55164e4ff744626aed398749f670369ec8b136f678e3eb90db835b537",
-      "validation_cache_file": "gesture_online_validation_cache.npz",
-      "validation_cache_sha256": "d6344055cb80a9b4da030c180234089fe239c0576f58b284ba2599367f6f209e"
-    },
-    "thresholds": {
-      "minimum_macro_f1": 0.9,
-      "minimum_per_class_f1": 0.8
-    }
+  "quality": {
+    "model": "EightGestureONNX",
+    "test_samples": 1769,
+    "accuracy": 0.9915206331260599,
+    "macro_f1": 0.9892799323293426,
+    "minimum_per_class_f1": 0.9747292418772563,
+    "known_mass_floor": 0.8,
+    "known_samples": 1769,
+    "unknown_samples": 1146,
+    "known_acceptance_rate": 0.9723007348784624,
+    "unknown_false_acceptance_rate": 0.01832460732984293,
+    "accepted_known_accuracy": 0.9959302325581395
   },
+  "open_set_rejection": {
+    "known_mass_floor": 0.8,
+    "known_samples": 1769,
+    "unknown_samples": 1146,
+    "known_acceptance_rate": 0.9723007348784624,
+    "unknown_false_acceptance_rate": 0.01832460732984293,
+    "accepted_known_accuracy": 0.9959302325581395
+  },
+  "hard_case_metrics": {
+    "rock_hard_negative_samples": 293,
+    "rock_false_acceptance_rate": 0.006825938566552901,
+    "rock_accepted_as_down_rate": 0.0,
+    "dorsal_samples": 427,
+    "dorsal_recall": 0.9976580796252927,
+    "dorsal_as_down_rate": 0.00234192037470726,
+    "down_samples": 229,
+    "down_recall": 0.9956331877729258,
+    "down_as_dorsal_rate": 0.0
+  },
+  "runtime_note": "Only eight command probabilities are exposed. no_gesture is a runtime rejection state based on hand presence, known mass, pose geometry, margin, and temporal stability; it is not a ninth classifier class.",
   "tool_versions": {
-    "onnx": "1.22.0",
+    "onnx": "1.17.0",
     "onnxruntime": "1.29.0",
-    "scikit-learn": "1.6.1",
-    "skl2onnx": "1.20.0"
+    "numpy": "2.5.2"
   }
 }

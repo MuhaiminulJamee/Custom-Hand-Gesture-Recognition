@@ -4,12 +4,8 @@ from dataclasses import dataclass
 import time
 
 
-FOLLOW_SEQUENCE = ("palm", "fist", "palm")
-FOLLOW_MESSAGES = (
-    "Begin Follow the object procedure",
-    "Grab the object",
-    "Release the object",
-)
+FOLLOW_SEQUENCE = ("open_palm",)
+FOLLOW_MESSAGES = ("Hold Open Palm to enable object tracking",)
 
 
 @dataclass(slots=True)
@@ -39,7 +35,7 @@ class FollowObjectStateMachine:
     _candidate_gesture: str | None = None
 
     sequence = FOLLOW_SEQUENCE
-    state_names = ("wait_palm", "wait_fist", "wait_final_palm")
+    state_names = ("wait_open_palm",)
 
     @property
     def active(self) -> bool:
@@ -119,7 +115,7 @@ class FollowObjectStateMachine:
         if self._started_at is not None and now - self._started_at > self.session_timeout_seconds:
             self.reset()
             return self.snapshot(
-                message="Follow Object timed out. Start again from palm.", reset=True
+                message="Object tracking timed out. Start again with Open Palm.", reset=True
             )
 
         if (
@@ -129,7 +125,7 @@ class FollowObjectStateMachine:
         ):
             self.start(now=now)
             return self.snapshot(
-                message="Step timed out. Begin again with palm.",
+                message="Step timed out. Begin again with Open Palm.",
                 reset=True,
                 source="timeout",
             )
@@ -165,7 +161,7 @@ class FollowObjectStateMachine:
             self.reset()
             return self.snapshot(
                 completed=True,
-                message="Follow the object successfully done",
+                message="Object tracking enabled",
                 confidence=confidence,
                 source=source,
                 hold_progress=1.0,

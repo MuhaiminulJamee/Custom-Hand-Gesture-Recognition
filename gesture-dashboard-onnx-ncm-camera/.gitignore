@@ -52,6 +52,8 @@ next-env.d.ts
 /models/*.task
 /models/*.csv
 /models/*.json
+/models/gesture_online_adapter_state.npz
+/models/online_adapter_backups/
 /feedback/*.csv
 /feedback/images/
 
@@ -61,5 +63,7 @@ next-env.d.ts
 !/models/gesture_mobile_runtime_config.json
 !/models/gesture_artifact_manifest.json
 !/models/hand_landmarker.task
-!/models/mediapipe_hagrid_rps_pinch15_hagrid_fist_follow_object_classification_report.csv
-!/models/mediapipe_hagrid_rps_pinch15_hagrid_fist_follow_object_test_metrics.csv
+!/models/eight_gesture_classification_report.csv
+!/models/eight_gesture_confusion_matrix.csv
+!/models/eight_gesture_hard_case_metrics.csv
+!/models/eight_gesture_test_metrics.csv

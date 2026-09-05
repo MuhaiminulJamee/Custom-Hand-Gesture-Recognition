@@ -42,7 +42,6 @@ class NcmCameraConfig:
     reconnect_delay_seconds: float = 1.0
     max_payload_bytes: int = DEFAULT_MAX_PAYLOAD
     rotate_180: bool = False
-    mirror_horizontal: bool = False
     auto_connect: bool = False
 
     @classmethod
@@ -73,7 +72,6 @@ class NcmCameraConfig:
                 os.getenv("NCM_MAX_JPEG_BYTES", str(DEFAULT_MAX_PAYLOAD))
             ),
             rotate_180=_env_bool("NCM_ROTATE_180", False),
-            mirror_horizontal=_env_bool("NCM_MIRROR_HORIZONTAL", False),
             auto_connect=_env_bool("NCM_AUTO_CONNECT", False),
         )
 
@@ -471,7 +469,7 @@ class NcmCameraClient:
             self._frame_ready.notify_all()
 
     def _apply_orientation(self, payload: bytes) -> bytes | None:
-        if not self.config.rotate_180 and not self.config.mirror_horizontal:
+        if not self.config.rotate_180:
             return payload
         try:
             import cv2
@@ -483,8 +481,6 @@ class NcmCameraClient:
             return None
         if self.config.rotate_180:
             image = cv2.rotate(image, cv2.ROTATE_180)
-        if self.config.mirror_horizontal:
-            image = cv2.flip(image, 1)
         encoded, buffer = cv2.imencode(
             ".jpg", image, [int(cv2.IMWRITE_JPEG_QUALITY), 92]
         )

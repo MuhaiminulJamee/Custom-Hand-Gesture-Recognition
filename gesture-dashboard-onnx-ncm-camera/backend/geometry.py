@@ -262,110 +262,147 @@ def _set_probability_floor(probabilities: np.ndarray, target_index: int, floor: 
 class GeometryResolver:
     config: RuntimeConfig
 
-    def _directional(self, probabilities: np.ndarray, landmarks: np.ndarray) -> tuple[np.ndarray, dict | None]:
+    def _directional(
+        self, probabilities: np.ndarray, landmarks: np.ndarray
+    ) -> tuple[np.ndarray, dict | None]:
         points = np.asarray(landmarks, dtype=np.float32).reshape(21, 2)
-        geometry = zoom_pose_geometry(points)
         raw = self.config.class_names[int(np.argmax(probabilities))]
-        strong_zoom = bool(
-            geometry["score"] >= 0.48 and geometry["thumb_opposition_score"] >= 0.18
-            and (raw in {"zoom_in", "zoom_out"} or (
-                geometry["strong_geometry"]
-                and geometry["thumb_opposition_score"] >= 0.45
-                and geometry["pair_reach_score"] >= 0.25
-            ))
-        )
-        if strong_zoom:
-            return probabilities, None
         pose_score = single_index_pose_score(points)
         vector = points[8] - points[5]
         norm = float(np.linalg.norm(vector))
         if norm < 1e-8:
-            return probabilities, None
+            return probabilities, {
+                "valid": raw not in {"left", "right", "up", "down"},
+                "reason": "degenerate index-finger direction",
+            }
         non_index_extensions = np.asarray([
             finger_extension_score(points, 9, 10, 11, 12),
             finger_extension_score(points, 13, 14, 15, 16),
             finger_extension_score(points, 17, 18, 19, 20),
         ], dtype=np.float32)
-        middle_extension = float(non_index_extensions[0])
-        index_reach = max(float(np.linalg.norm(points[8] - points[0])), 1e-8)
-        peace = middle_extension >= 0.60 and float(np.linalg.norm(points[12] - points[0]) / index_reach) >= 0.72
         dominance = float(np.max(np.abs(vector)) / norm)
-        if (
-            pose_score < 0.72
-            or dominance < 0.78
-            or peace
-            or float(non_index_extensions.max()) > 0.55
-        ):
-            return probabilities, None
+        directional = bool(
+            pose_score >= 0.50
+            and dominance >= 0.78
+            and float(non_index_extensions.mean()) <= 0.70
+        )
         dx, dy = map(float, vector)
-        gesture = ("one_down" if dy > 0 else "one") if abs(dy) >= abs(dx) else ("one_right" if dx > 0 else "one_left")
+        gesture = (
+            ("down" if dy > 0 else "up")
+            if abs(dy) >= abs(dx)
+            else ("right" if dx > 0 else "left")
+        )
+        details = {
+            "valid": directional if raw in {"left", "right", "up", "down"} else True,
+            "gesture": gesture,
+            "pose_score": pose_score,
+            "axis_dominance": dominance,
+            "maximum_non_index_extension": float(non_index_extensions.max()),
+            "mean_non_index_extension": float(non_index_extensions.mean()),
+            "horizontal_mirror": False,
+        }
+        if not directional:
+            if raw in {"left", "right", "up", "down"}:
+                details["reason"] = "direction command does not have a clean single-index pose"
+            return probabilities, details
         floor = min(0.98, 0.92 + 0.06 * max(0.0, pose_score - 0.72) / 0.28)
-        return _set_probability_floor(probabilities, self.config.class_to_idx[gesture], floor), {
-            "gesture": gesture, "pose_score": pose_score, "axis_dominance": dominance,
-        }
+        details["valid"] = True
+        return _set_probability_floor(
+            probabilities, self.config.class_to_idx[gesture], floor
+        ), details
 
-    def _zoom(self, probabilities: np.ndarray, landmarks: np.ndarray) -> tuple[np.ndarray, dict | None]:
-        calibration = self.config.zoom_gap_calibration
-        if not calibration:
-            return probabilities, None
+    def _hand_shape(
+        self, probabilities: np.ndarray, landmarks: np.ndarray
+    ) -> tuple[np.ndarray, dict[str, float | int | bool | str]]:
+        points = np.asarray(landmarks, dtype=np.float32).reshape(21, 2)
         adjusted = np.asarray(probabilities, dtype=np.float64).copy()
-        indexes = self.config.class_to_idx
         raw = self.config.class_names[int(np.argmax(adjusted))]
-        geometry = zoom_pose_geometry(landmarks)
-        combined = float(adjusted[indexes["zoom_in"]] + adjusted[indexes["zoom_out"]])
-        credible = bool(geometry["score"] >= 0.48 and geometry["thumb_opposition_score"] >= 0.18)
-        if raw in {"zoom_in", "zoom_out"} and not credible:
-            adjusted[indexes["zoom_in"]] = adjusted[indexes["zoom_out"]] = 0.0
-            total = float(adjusted.sum())
-            if total <= 1e-12:
-                adjusted[indexes["no_gesture"]] = 1.0
-            else:
-                adjusted /= total
-            return adjusted, None
-        rescue = bool(
-            (raw == "no_gesture" and combined >= 0.10 and geometry["strong_geometry"])
-            or (
-                raw in {"one", "one_down", "one_left", "one_right"}
-                and combined >= 0.005 and geometry["strong_geometry"]
-                and geometry["thumb_opposition_score"] >= 0.45
-                and geometry["pair_reach_score"] >= 0.25
+        extensions = np.asarray([
+            finger_extension_score(points, 1, 2, 3, 4),
+            finger_extension_score(points, 5, 6, 7, 8),
+            finger_extension_score(points, 9, 10, 11, 12),
+            finger_extension_score(points, 13, 14, 15, 16),
+            finger_extension_score(points, 17, 18, 19, 20),
+        ], dtype=np.float32)
+        thumb_vector = points[4] - points[2]
+        thumb_norm = max(float(np.linalg.norm(thumb_vector)), 1e-8)
+        thumb_up_score = float(-thumb_vector[1] / thumb_norm)
+        non_thumb = extensions[1:]
+        extended_non_thumb_count = int((non_thumb >= 0.58).sum())
+        extended_other_count = int((extensions[2:] >= 0.58).sum())
+        gap = thumb_index_gap_ratio(points)
+        dorsal = return_main_pose_geometry(points)
+        dorsal_valid = bool(
+            dorsal["score"] >= 0.76
+            and dorsal["downward_finger_count"] >= 4
+            and dorsal["minimum_extension_score"] >= 0.50
+        )
+        open_palm_valid = bool(
+            extended_non_thumb_count == 4
+            and float(non_thumb.mean()) >= 0.78
+            and not dorsal_valid
+        )
+        like_valid = bool(
+            extensions[0] >= 0.60
+            and float(non_thumb.mean()) <= 0.72
+            and thumb_up_score >= 0.55
+        )
+        ok_valid = bool(
+            gap <= 0.58
+            and extended_other_count >= 2
+            and extensions[1] <= 0.82
+        )
+        validators = {
+            "open_palm": open_palm_valid,
+            "like": like_valid,
+            "dorsal": dorsal_valid,
+            "ok": ok_valid,
+        }
+        # Geometry may safely resolve the two open-hand orientations even when
+        # perspective causes the MLP to swap them.
+        if dorsal_valid and raw in {"open_palm", "dorsal", "down"}:
+            adjusted = _set_probability_floor(
+                adjusted, self.config.class_to_idx["dorsal"], 0.96
             )
-        )
-        if raw not in {"zoom_in", "zoom_out"} and not rescue:
-            return adjusted, None
-        gap = thumb_index_gap_ratio(landmarks)
-        threshold = float(calibration["threshold"])
-        gesture = "zoom_in" if gap >= threshold else "zoom_out"
-        margin = float(calibration.get("hysteresis_margin", 0.025))
-        floor = min(0.98, 0.90 + 0.06 * min(1.0, abs(gap - threshold) / max(margin, 1e-6)))
-        adjusted = _set_probability_floor(adjusted, indexes[gesture], floor)
+            raw = "dorsal"
+        elif open_palm_valid and raw in {"open_palm", "dorsal"}:
+            adjusted = _set_probability_floor(
+                adjusted, self.config.class_to_idx["open_palm"], 0.96
+            )
+            raw = "open_palm"
+        valid = validators.get(raw, True)
+        reason = "pose geometry accepted" if valid else f"{raw} hand shape failed geometry checks"
         return adjusted, {
-            "gesture": gesture, "gap_ratio": gap, "threshold": threshold,
-            "pose_score": float(geometry["score"]),
-            "thumb_opposition_score": float(geometry["thumb_opposition_score"]),
-            "combined_zoom_probability": combined,
+            "valid": bool(valid),
+            "reason": reason,
+            "resolved_gesture": raw,
+            "thumb_extension": float(extensions[0]),
+            "index_extension": float(extensions[1]),
+            "middle_extension": float(extensions[2]),
+            "ring_extension": float(extensions[3]),
+            "pinky_extension": float(extensions[4]),
+            "thumb_up_score": thumb_up_score,
+            "thumb_index_gap_ratio": gap,
+            "extended_non_thumb_count": extended_non_thumb_count,
+            "dorsal_score": float(dorsal["score"]),
+            "downward_finger_count": int(dorsal["downward_finger_count"]),
         }
-
-    def _return_main(self, probabilities: np.ndarray, landmarks: np.ndarray) -> tuple[np.ndarray, dict | None]:
-        adjusted = np.asarray(probabilities, dtype=np.float64).copy()
-        geometry = return_main_pose_geometry(landmarks)
-        target = self.config.class_to_idx["dorsal_hand"]
-        raw = self.config.class_names[int(np.argmax(adjusted))]
-        supported = bool(
-            geometry["score"] >= 0.70 and geometry["downward_finger_count"] >= 4
-            and adjusted[target] >= 0.05
-        )
-        if raw not in {"dorsal_hand", "palm", "no_gesture"} or not (geometry["strong_geometry"] or supported):
-            return adjusted, None
-        floor = min(0.98, 0.92 + 0.05 * max(0.0, float(geometry["score"]) - 0.70) / 0.30)
-        return _set_probability_floor(adjusted, target, floor), geometry
 
     def resolve(self, probabilities: np.ndarray, landmarks: np.ndarray) -> tuple[np.ndarray, dict[str, dict | None]]:
         adjusted, directional = self._directional(probabilities, landmarks)
-        adjusted, zoom = self._zoom(adjusted, landmarks)
-        adjusted, return_main = self._return_main(adjusted, landmarks)
+        adjusted, shape = self._hand_shape(adjusted, landmarks)
+        resolved = self.config.class_names[int(np.argmax(adjusted))]
+        valid = bool(shape.get("valid", True))
+        reason = str(shape.get("reason", "pose geometry accepted"))
+        if resolved in {"left", "right", "up", "down"}:
+            valid = bool(directional.get("valid", False))
+            reason = str(directional.get("reason", "direction geometry accepted"))
         return adjusted, {
             "directional": directional,
-            "zoom": zoom,
-            "return_main": return_main,
+            "hand_shape": shape,
+            "pose_validation": {
+                "valid": valid,
+                "reason": reason,
+                "gesture": resolved,
+            },
         }

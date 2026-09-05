@@ -1,0 +1,2 @@
+model,test_samples,accuracy,macro_f1,minimum_per_class_f1,known_mass_floor,known_samples,unknown_samples,known_acceptance_rate,unknown_false_acceptance_rate,accepted_known_accuracy
+EightGestureONNX,1769,0.9915206331260599,0.9892799323293426,0.9747292418772563,0.8,1769,1146,0.9723007348784624,0.01832460732984293,0.9959302325581395

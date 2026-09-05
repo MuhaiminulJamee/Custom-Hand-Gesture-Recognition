@@ -3,48 +3,34 @@
 /* Local blob image previews must use native img elements. */
 /* eslint-disable @next/next/no-img-element */
 
-import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 const API_URL = process.env.NEXT_PUBLIC_GESTURE_API_URL ?? 'http://127.0.0.1:8200';
 const WS_URL = API_URL.replace(/^http/, 'ws');
 const DEFAULT_CLASSES = [
-  'call', 'rock', 'like', 'ok', 'one', 'one_down', 'one_left', 'one_right',
-  'palm', 'peace', 'dorsal_hand', 'fist', 'zoom_in', 'zoom_out', 'no_gesture',
+  'left', 'right', 'up', 'down', 'open_palm', 'like', 'dorsal', 'ok',
 ];
 const DEFAULT_ACTIONS: Record<string, string> = {
-  call: 'Detect My Face',
-  rock: 'Pause Video',
-  like: 'Stop / Continue',
-  ok: 'Start Recording',
-  one: 'Move Up',
-  one_down: 'Move Down',
-  one_left: 'Move Left',
-  one_right: 'Move Right',
-  palm: 'Open Palm',
-  peace: 'End Recording',
-  dorsal_hand: 'Return to Main Position',
-  fist: 'Fist (Follow Object phase)',
-  zoom_in: 'Zoom In',
-  zoom_out: 'Zoom Out',
-  no_gesture: 'No Gesture',
+  left: 'Move Left',
+  right: 'Move Right',
+  up: 'Move Up',
+  down: 'Move Down',
+  open_palm: 'Enable / Disable Object Tracking',
+  like: 'Play / Pause',
+  dorsal: 'Return to Default Position',
+  ok: 'Start / Stop Recording',
 };
 const DEMO_COMMANDS: Record<string, string> = {
-  call: 'DETECT_FACE',
-  rock: 'PAUSE_VIDEO',
+  left: 'MOVE_LEFT',
+  right: 'MOVE_RIGHT',
+  up: 'MOVE_UP',
+  down: 'MOVE_DOWN',
+  open_palm: 'TOGGLE_TRACKING',
   like: 'TOGGLE_PLAYBACK',
-  ok: 'START_RECORDING',
-  one: 'MOVE_UP',
-  one_down: 'MOVE_DOWN',
-  one_left: 'MOVE_LEFT',
-  one_right: 'MOVE_RIGHT',
-  palm: 'OPEN_OR_RELEASE',
-  peace: 'END_RECORDING',
-  dorsal_hand: 'RETURN_HOME',
-  fist: 'GRAB_OBJECT',
-  zoom_in: 'ZOOM_IN',
-  zoom_out: 'ZOOM_OUT',
-  no_gesture: 'NONE',
+  dorsal: 'RETURN_HOME',
+  ok: 'TOGGLE_RECORDING',
 };
+const CANONICAL_CLASS_SET = new Set(DEFAULT_CLASSES);
 const HAND_CONNECTIONS = [
   [0, 1], [1, 2], [2, 3], [3, 4], [0, 5], [5, 6], [6, 7], [7, 8],
   [5, 9], [9, 10], [10, 11], [11, 12], [9, 13], [13, 14], [14, 15],
@@ -71,6 +57,7 @@ type Timing = {
   frame_budget_ms?: number;
   budget_used_percent?: number;
   headroom_ms?: number;
+  target_fps_capacity_pass?: boolean;
   ten_fps_capacity_pass?: boolean;
   verdict?: 'PASS' | 'FAIL';
 };
@@ -83,17 +70,6 @@ type Diagnostic = {
   execute: boolean;
   reason: string;
   classifier_ms: number;
-};
-type FollowState = {
-  state: string;
-  step_index: number;
-  completed: boolean;
-  active: boolean;
-  message: string;
-  expected_gesture?: string;
-  hold_progress?: number;
-  confidence?: number;
-  source?: string;
 };
 type Health = {
   status: string;
@@ -112,6 +88,7 @@ type Health = {
   };
   config: {
     class_names: string[];
+    feedback_labels?: string[];
     gesture_to_action: Record<string, string>;
     target_fps: number;
     frame_interval_ms: number;
@@ -171,7 +148,8 @@ type Health = {
     frames_total: number;
     errors_total: number;
     error_rate: number;
-    ten_fps_budget_pass_rate: number;
+    target_fps_budget_pass_rate?: number;
+    ten_fps_budget_pass_rate?: number;
     active_sessions: number;
     peak_sessions: number;
     timing: Record<string, { count: number; mean?: number; p50?: number; p95?: number; p99?: number }>;
@@ -216,6 +194,7 @@ type Prediction = {
   held_seconds?: number;
   probabilities?: Record<string, number>;
   raw_probabilities?: Record<string, number>;
+  base_probabilities?: Record<string, number>;
   feature_vector?: number[];
   landmarks?: number[][];
   actual_fps?: number;
@@ -224,7 +203,6 @@ type Prediction = {
   ncm_frame_id?: number;
   timing?: Timing;
   diagnostics?: Record<string, Diagnostic>;
-  follow_object?: FollowState;
 };
 type MetricResponse = { files: string[]; rows: Record<string, Record<string, string>[]> };
 type ActionEvent = { action: string; prediction: string; confidence: number; session_id?: string };
@@ -245,7 +223,12 @@ type DemoMediaAsset = {
   height?: number;
 };
 type VideoTransform = { x: number; y: number; scale: number };
-type LearningMode = 'audit' | 'safe' | 'force';
+type LearningMode = 'audit' | 'safe';
+
+function canonicalGesture(value?: string) {
+  if (!value) return undefined;
+  return CANONICAL_CLASS_SET.has(value) ? value : undefined;
+}
 
 function humanize(value?: string) {
   if (!value) return 'Waiting';
@@ -268,11 +251,9 @@ export default function Dashboard() {
   const [ncmMessage, setNcmMessage] = useState('Development-board link has not been tested yet.');
   const [streamRevision, setStreamRevision] = useState(0);
   const [selectedModel, setSelectedModel] = useState('');
-  const [followActive, setFollowActive] = useState(false);
-  const [successVisible, setSuccessVisible] = useState(false);
   const [feedbackCount, setFeedbackCount] = useState(0);
   const [actualLabel, setActualLabel] = useState('no_gesture');
-  const [learningMode] = useState<LearningMode>('audit');
+  const [learningMode, setLearningMode] = useState<LearningMode>('safe');
   const [feedbackNote, setFeedbackNote] = useState('');
   const [feedbackMessage, setFeedbackMessage] = useState('');
   const [uploading, setUploading] = useState(false);
@@ -283,8 +264,7 @@ export default function Dashboard() {
   const [demoEvents, setDemoEvents] = useState<DemoEvent[]>([]);
   const [demoRecording, setDemoRecording] = useState(false);
   const [recordingDownloadUrl, setRecordingDownloadUrl] = useState<string | null>(null);
-  const [faceScanActive, setFaceScanActive] = useState(false);
-  const [objectGrabbed, setObjectGrabbed] = useState(false);
+  const [objectTrackingEnabled, setObjectTrackingEnabled] = useState(false);
   const [actionToast, setActionToast] = useState<ActionToast | null>(null);
   const [imagePreviewActive, setImagePreviewActive] = useState(true);
 
@@ -292,8 +272,8 @@ export default function Dashboard() {
   const demoImageRef = useRef<HTMLImageElement | null>(null);
   const demoRecordingCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const landmarkCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const feedbackLandmarkCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
-  const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSnapshotRef = useRef<string | null>(null);
   const stopCameraRef = useRef<(preservePrediction?: boolean) => void>(() => undefined);
   const executeDemoPredictionRef = useRef<(message: Prediction) => void>(() => undefined);
@@ -303,24 +283,42 @@ export default function Dashboard() {
   const recordingChunksRef = useRef<Blob[]>([]);
   const lastExecutedGestureRef = useRef<string | null>(null);
   const gestureReleaseFramesRef = useRef(0);
-  const faceScanTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const actionToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recordingFrameTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const recordingStreamRef = useRef<MediaStream | null>(null);
 
-  const targetFps = health?.config.target_fps ?? 10;
+  const targetFps = health?.config.target_fps ?? 20;
+  const frameBudgetMs = health?.config.frame_budget_ms ?? prediction.timing?.frame_budget_ms ?? (1000 / targetFps);
   const stableRequired = health?.config.stable_frames_required ?? 3;
-  const classNames = health?.config.class_names ?? DEFAULT_CLASSES;
-  const actionMap = health?.config.gesture_to_action ?? DEFAULT_ACTIONS;
+  const classNames = DEFAULT_CLASSES;
+  const actionMap = DEFAULT_ACTIONS;
+  const feedbackLabels = useMemo(() => {
+    const configured = health?.config.feedback_labels;
+    if (!configured?.length) return [...DEFAULT_CLASSES, 'no_gesture'];
+    const normalized = configured
+      .map((label) => label === 'no_gesture' ? label : canonicalGesture(label))
+      .filter((label): label is string => Boolean(label));
+    const labels = [...new Set(normalized)];
+    if (!labels.includes('no_gesture')) labels.push('no_gesture');
+    return labels;
+  }, [health?.config.feedback_labels]);
+  const selectedFeedbackLabel = feedbackLabels.includes(actualLabel)
+    ? actualLabel
+    : feedbackLabels[0] ?? 'no_gesture';
   const selectableModels = health?.engine.model.selectable_models ?? health?.engine.model.available_models ?? [];
   const serverReady = Boolean(health?.operational_ready ?? health?.engine.ready);
   const qualification = health?.production?.release_qualification;
   const runtimeSummary = health?.runtime_metrics;
-  const mappedLabel = prediction.mapped_action
-    ?? (prediction.runtime_prediction ? actionMap[prediction.runtime_prediction] : undefined)
+  const onlineLearning = health?.online_learning;
+  const runtimeGesture = canonicalGesture(prediction.runtime_prediction);
+  const feedbackPrediction = runtimeGesture ?? (prediction.runtime_prediction === 'no_gesture' ? 'no_gesture' : undefined);
+  const mappedLabel = (runtimeGesture ? actionMap[runtimeGesture] : undefined)
     ?? 'Waiting for prediction';
   const timing = prediction.timing;
   const pipelineVerdict = timing?.verdict ?? 'WAITING';
+  const targetCapacityPass = timing?.target_fps_capacity_pass ?? timing?.ten_fps_capacity_pass;
+  const targetBudgetPassRate = runtimeSummary?.target_fps_budget_pass_rate
+    ?? runtimeSummary?.ten_fps_budget_pass_rate;
 
   const refreshServerData = async () => {
     try {
@@ -342,7 +340,11 @@ export default function Dashboard() {
       if (metricResponse.ok) setMetrics(await metricResponse.json() as MetricResponse);
       if (actionResponse.ok) {
         const actionData = await actionResponse.json() as { recent?: ActionEvent[] };
-        setActions(actionData.recent ?? []);
+        const canonicalActions = (actionData.recent ?? []).flatMap((item) => {
+          const gesture = canonicalGesture(item.prediction);
+          return gesture ? [{ ...item, prediction: gesture, action: DEFAULT_ACTIONS[gesture] }] : [];
+        });
+        setActions(canonicalActions);
       }
       if (feedbackResponse.ok) {
         const feedbackData = await feedbackResponse.json() as { count?: number };
@@ -360,8 +362,6 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => () => {
-    if (successTimerRef.current) clearTimeout(successTimerRef.current);
-    if (faceScanTimerRef.current) clearTimeout(faceScanTimerRef.current);
     if (actionToastTimerRef.current) clearTimeout(actionToastTimerRef.current);
     if (recordingFrameTimerRef.current) clearInterval(recordingFrameTimerRef.current);
     if (mediaRecorderRef.current?.state !== 'inactive') mediaRecorderRef.current?.stop();
@@ -388,8 +388,7 @@ export default function Dashboard() {
     [prediction.diagnostics],
   );
 
-  const drawLandmarks = (landmarks?: number[][]) => {
-    const canvas = landmarkCanvasRef.current;
+  const drawLandmarksOnCanvas = useCallback((canvas: HTMLCanvasElement | null, landmarks?: number[][]) => {
     if (!canvas) return;
     const size = Math.max(1, Math.round(canvas.clientWidth || 400));
     canvas.width = size;
@@ -412,9 +411,14 @@ export default function Dashboard() {
       context.arc(x * size, y * size, Math.max(2.4, size / 120), 0, Math.PI * 2);
       context.fill();
     });
-  };
+  }, []);
 
-  useEffect(() => { drawLandmarks(prediction.landmarks); }, [prediction.landmarks]);
+  const drawLandmarks = useCallback((landmarks?: number[][]) => {
+    drawLandmarksOnCanvas(landmarkCanvasRef.current, landmarks);
+    drawLandmarksOnCanvas(feedbackLandmarkCanvasRef.current, landmarks);
+  }, [drawLandmarksOnCanvas]);
+
+  useEffect(() => { drawLandmarks(prediction.landmarks); }, [prediction.landmarks, activeTab, drawLandmarks]);
 
   const stopCamera = (preservePrediction = false) => {
     socketRef.current?.close();
@@ -422,7 +426,6 @@ export default function Dashboard() {
     void fetch(`${API_URL}/api/ncm/disconnect`, { method: 'POST' }).finally(refreshServerData);
     setCameraActive(false);
     setConnection('offline');
-    setFollowActive(false);
     if (!preservePrediction) drawLandmarks();
   };
 
@@ -430,19 +433,8 @@ export default function Dashboard() {
     stopCameraRef.current = stopCamera;
   });
 
-  const showSuccess = () => {
-    stopCameraRef.current(true);
-    setSuccessVisible(true);
-    if (successTimerRef.current) clearTimeout(successTimerRef.current);
-    successTimerRef.current = setTimeout(
-      () => setSuccessVisible(false),
-      (health?.config.follow_success_display_seconds ?? 8) * 1000,
-    );
-  };
-
-  const startCamera = async (beginFollowImmediately = false) => {
+  const startCamera = async () => {
     if (cameraActive) return;
-    setSuccessVisible(false);
     setConnection('connecting');
     setPrediction({
       status: 'starting',
@@ -461,7 +453,6 @@ export default function Dashboard() {
         setConnection('online');
         setCameraActive(true);
         if (selectedModel) socket.send(JSON.stringify({ type: 'select_model', model: selectedModel }));
-        if (beginFollowImmediately) socket.send(JSON.stringify({ type: 'start_follow_object' }));
       };
       socket.onmessage = (event) => {
         const message = JSON.parse(event.data);
@@ -470,22 +461,17 @@ export default function Dashboard() {
           setCameraFps(message.camera_fps ?? null);
           if (message.ncm_camera) setNcmStatus(message.ncm_camera);
           setSnapshotReady(true);
-          setFollowActive(Boolean(message.follow_object?.active));
           executeDemoPredictionRef.current(message);
           if (message.runtime_action && message.runtime_action !== 'Wait / No Action') {
-            setActions((current) => [{
-              action: message.runtime_action,
-              prediction: message.runtime_prediction,
-              confidence: message.confidence,
-            }, ...current].slice(0, 30));
+            const canonicalPrediction = canonicalGesture(message.runtime_prediction);
+            if (canonicalPrediction) {
+              setActions((current) => [{
+                action: DEFAULT_ACTIONS[canonicalPrediction],
+                prediction: canonicalPrediction,
+                confidence: message.confidence,
+              }, ...current].slice(0, 30));
+            }
           }
-          if (message.follow_object?.completed) {
-            showSuccess();
-            return;
-          }
-        } else if (message.type === 'follow_object_started' || message.type === 'follow_object_stopped') {
-          setFollowActive(Boolean(message.follow_object?.active));
-          setPrediction((current) => ({ ...current, follow_object: message.follow_object }));
         } else if (message.type === 'ncm_status' && message.camera) {
           setNcmStatus(message.camera);
           setCameraFps(message.camera.camera_fps ?? null);
@@ -507,7 +493,7 @@ export default function Dashboard() {
 
   const toggleCamera = () => {
     if (cameraActive) stopCameraRef.current();
-    else void startCamera(false);
+    else void startCamera();
   };
 
   const discoverNcmCamera = async () => {
@@ -530,26 +516,11 @@ export default function Dashboard() {
     }
   };
 
-  const beginFollowObject = () => {
-    setSuccessVisible(false);
-    if (!cameraActive || socketRef.current?.readyState !== WebSocket.OPEN) {
-      void startCamera(true);
-      return;
-    }
-    socketRef.current.send(JSON.stringify({ type: 'start_follow_object' }));
-  };
-
-  const stopFollowObject = () => {
-    socketRef.current?.send(JSON.stringify({ type: 'stop_follow_object' }));
-    setFollowActive(false);
-  };
-
   const resetSession = () => {
     socketRef.current?.send(JSON.stringify({ type: 'reset' }));
     lastSnapshotRef.current = null;
     setSnapshotReady(false);
-    setFollowActive(false);
-    setPrediction({ status: 'reset', message: 'Temporal EMA and Follow Object state reset.' });
+    setPrediction({ status: 'reset', message: 'Temporal smoothing and gesture state reset.' });
     drawLandmarks();
   };
 
@@ -678,7 +649,7 @@ export default function Dashboard() {
     mediaRecorderRef.current = recorder;
     recorder.start(500);
     setDemoRecording(true);
-    return `Recording started for the uploaded ${asset.kind}. Show Peace to finish and create the downloadable WebM clip.`;
+    return `Recording started for the uploaded ${asset.kind}. Show OK again to stop and create the downloadable WebM clip.`;
   };
 
   const stopDemoRecording = (): string => {
@@ -697,24 +668,6 @@ export default function Dashboard() {
       let detail = '';
       let toastLabel = command.replaceAll('_', ' ');
       switch (command) {
-        case 'DETECT_FACE':
-          setFaceScanActive(true);
-          if (faceScanTimerRef.current) clearTimeout(faceScanTimerRef.current);
-          faceScanTimerRef.current = setTimeout(() => setFaceScanActive(false), 2500);
-          detail = 'Face-target request performed: the target focus marker is active.';
-          toastLabel = 'FACE TARGET ACTIVE';
-          break;
-        case 'PAUSE_VIDEO':
-          if (asset.kind === 'video') {
-            targetVideo?.pause();
-            detail = 'Uploaded video paused.';
-            toastLabel = 'VIDEO PAUSED';
-          } else {
-            setImagePreviewActive(false);
-            detail = 'Uploaded image preview paused and dimmed.';
-            toastLabel = 'IMAGE PAUSED';
-          }
-          break;
         case 'TOGGLE_PLAYBACK':
           if (asset.kind === 'image') {
             const next = !imagePreviewActive;
@@ -731,13 +684,14 @@ export default function Dashboard() {
             toastLabel = 'VIDEO PAUSED';
           }
           break;
-        case 'START_RECORDING':
-          detail = await startDemoRecording();
-          toastLabel = detail.startsWith('Recording is') ? 'RECORDING ALREADY ACTIVE' : 'RECORDING STARTED';
-          break;
-        case 'END_RECORDING':
-          detail = stopDemoRecording();
-          toastLabel = detail.startsWith('No demonstration') ? 'NO RECORDING ACTIVE' : 'RECORDING ENDED';
+        case 'TOGGLE_RECORDING':
+          if (mediaRecorderRef.current?.state === 'recording') {
+            detail = stopDemoRecording();
+            toastLabel = 'RECORDING STOPPED';
+          } else {
+            detail = await startDemoRecording();
+            toastLabel = detail.startsWith('Recording is') ? 'RECORDING ALREADY ACTIVE' : 'RECORDING STARTED';
+          }
           break;
         case 'MOVE_UP':
           updateDemoTransform((current) => ({ ...current, y: Math.max(-24, current.y - 8) }));
@@ -759,47 +713,21 @@ export default function Dashboard() {
           detail = 'Video target moved right.';
           toastLabel = 'MOVED RIGHT';
           break;
-        case 'OPEN_OR_RELEASE':
-          if (objectGrabbed) {
-            setObjectGrabbed(false);
-            detail = 'The followed object was released.';
-            toastLabel = 'OBJECT RELEASED';
-          } else if (asset.kind === 'image') {
-            setImagePreviewActive(true);
-            detail = 'Open Palm performed: uploaded image preview is active.';
-            toastLabel = 'IMAGE OPENED';
-          } else {
-            await targetVideo?.play();
-            detail = 'Open Palm performed: uploaded video is playing.';
-            toastLabel = 'VIDEO PLAYING';
-          }
+        case 'TOGGLE_TRACKING': {
+          const next = !objectTrackingEnabled;
+          setObjectTrackingEnabled(next);
+          detail = next
+            ? 'Object tracking enabled. Directional gestures reposition the tracked target.'
+            : 'Object tracking disabled.';
+          toastLabel = next ? 'OBJECT TRACKING ENABLED' : 'OBJECT TRACKING DISABLED';
           break;
+        }
         case 'RETURN_HOME':
           updateDemoTransform(() => ({ x: 0, y: 0, scale: 1 }));
-          setObjectGrabbed(false);
+          setObjectTrackingEnabled(false);
           setImagePreviewActive(true);
-          detail = 'Video returned to its main position and original zoom.';
-          toastLabel = 'RETURNED TO MAIN POSITION';
-          break;
-        case 'GRAB_OBJECT':
-          setObjectGrabbed(true);
-          detail = 'Object grabbed. Directional gestures now visibly reposition the target.';
-          toastLabel = 'OBJECT GRABBED';
-          break;
-        case 'ZOOM_IN':
-          updateDemoTransform((current) => ({ ...current, scale: Math.min(2, Number((current.scale + 0.2).toFixed(2))) }));
-          detail = 'Video zoomed in.';
-          toastLabel = 'ZOOMED IN';
-          break;
-        case 'ZOOM_OUT':
-          updateDemoTransform((current) => ({ ...current, scale: Math.max(0.7, Number((current.scale - 0.2).toFixed(2))) }));
-          detail = 'Video zoomed out.';
-          toastLabel = 'ZOOMED OUT';
-          break;
-        case 'FOLLOW_OBJECT_COMPLETE':
-          setObjectGrabbed(false);
-          detail = 'Palm-Fist-Palm Follow Object procedure completed successfully.';
-          toastLabel = 'FOLLOW OBJECT COMPLETED';
+          detail = 'Target returned to its default position and object tracking was cleared.';
+          toastLabel = 'RETURNED TO DEFAULT POSITION';
           break;
         default:
           return;
@@ -817,13 +745,17 @@ export default function Dashboard() {
   };
 
   const executeDemoPrediction = (message: Prediction) => {
-    const gesture = message.runtime_prediction;
-    if (!gesture || !demoVideoAssetRef.current) return;
+    const reportedGesture = message.runtime_prediction;
+    if (!reportedGesture || !demoVideoAssetRef.current) return;
+    const gesture = canonicalGesture(reportedGesture);
     const lastGesture = lastExecutedGestureRef.current;
-    if (gesture === 'no_gesture') {
+    if (reportedGesture === 'no_gesture') {
       lastExecutedGestureRef.current = null;
       gestureReleaseFramesRef.current = 0;
-    } else if (lastGesture && message.raw_prediction && message.raw_prediction !== lastGesture) {
+      return;
+    }
+    if (!gesture) return;
+    if (lastGesture && message.raw_prediction && canonicalGesture(message.raw_prediction) !== lastGesture) {
       gestureReleaseFramesRef.current += 1;
       if (gestureReleaseFramesRef.current >= 2) {
         lastExecutedGestureRef.current = null;
@@ -834,7 +766,7 @@ export default function Dashboard() {
     }
     const action = message.runtime_action;
     if (!action || action === 'Wait / No Action' || action === 'No Gesture') return;
-    const command = action === 'Follow Object' ? 'FOLLOW_OBJECT_COMPLETE' : DEMO_COMMANDS[gesture];
+    const command = DEMO_COMMANDS[gesture];
     if (!command || command === 'NONE' || lastExecutedGestureRef.current === gesture) return;
     lastExecutedGestureRef.current = gesture;
     gestureReleaseFramesRef.current = 0;
@@ -882,7 +814,7 @@ export default function Dashboard() {
       updateDemoTransform(() => ({ x: 0, y: 0, scale: 1 }));
       setDemoEvents([]);
       setActionToast(null);
-      setObjectGrabbed(false);
+      setObjectTrackingEnabled(false);
       setImagePreviewActive(true);
       setRecordingDownloadUrl((current) => {
         if (current) URL.revokeObjectURL(current);
@@ -904,8 +836,7 @@ export default function Dashboard() {
     setDemoVideo(null);
     setDemoEvents([]);
     setActionToast(null);
-    setFaceScanActive(false);
-    setObjectGrabbed(false);
+    setObjectTrackingEnabled(false);
     setImagePreviewActive(true);
     setRecordingDownloadUrl((current) => {
       if (current) URL.revokeObjectURL(current);
@@ -943,7 +874,7 @@ export default function Dashboard() {
   };
 
   const submitFeedback = async () => {
-    setFeedbackMessage(learningMode === 'audit' ? 'Saving reviewed sample…' : 'Validating candidate update…');
+    setFeedbackMessage(learningMode === 'audit' ? 'Saving reviewed sample…' : 'Validating a guarded online update…');
     try {
       if (prediction.ncm_frame_id != null) {
         const snapshotResponse = await fetch(`${API_URL}/api/ncm/frame.jpg`, { cache: 'no-store' });
@@ -961,12 +892,13 @@ export default function Dashboard() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          actual_label: actualLabel,
-          predicted_label: prediction.runtime_prediction ?? 'no_gesture',
+          actual_label: selectedFeedbackLabel,
+          predicted_label: feedbackPrediction ?? 'no_gesture',
           runtime_action: prediction.runtime_action ?? 'Wait / No Action',
           confidence: prediction.confidence ?? 0,
           model_name: prediction.model ?? selectedModel ?? 'unknown',
           probabilities: prediction.probabilities ?? {},
+          base_probabilities: prediction.base_probabilities ?? prediction.raw_probabilities ?? null,
           feature_vector: prediction.feature_vector ?? null,
           landmarks: prediction.landmarks ?? null,
           note: feedbackNote,
@@ -993,10 +925,6 @@ export default function Dashboard() {
       setFeedbackMessage('The local server is not available.');
     }
   };
-
-  const follow = prediction.follow_object;
-  const followStep = follow?.step_index ?? 0;
-  const followMessage = follow?.message ?? 'Press Begin Follow Object to start the dedicated sequence.';
 
   return (
     <main className="app-shell">
@@ -1028,7 +956,7 @@ export default function Dashboard() {
       <section className="workspace">
         {activeTab === 'live' && <>
           <div className="section-heading">
-            <div><p className="eyebrow">DEVELOPMENT-BOARD RECOGNITION</p><h2>10 FPS JLIP camera qualification</h2></div>
+            <div><p className="eyebrow">EIGHT-GESTURE RECOGNITION</p><h2>{targetFps.toFixed(0)} FPS JLIP camera qualification</h2></div>
             <div className="heading-actions">
               <label className="primary-button file-button demo-upload-button">
                 {demoVideo ? 'Replace demo media' : 'Upload video / image'}
@@ -1077,11 +1005,11 @@ export default function Dashboard() {
           </div>}
 
           <article className={`qualification-strip ${pipelineVerdict.toLowerCase()}`}>
-            <div><span>10 FPS CAPACITY TEST</span><strong>{pipelineVerdict}</strong></div>
+            <div><span>{targetFps.toFixed(0)} FPS CAPACITY TEST</span><strong>{pipelineVerdict}</strong></div>
             <p>{timing
-              ? timing.ten_fps_capacity_pass
-                ? `Pipeline uses ${timing.budget_used_percent?.toFixed(1)}% of the 100 ms frame budget. This PC can sustain the configured 10 FPS workload.`
-                : `Pipeline needs ${timing.total_ms?.toFixed(1)} ms per frame, above the 100 ms budget. Reduce workload or use faster hardware.`
+              ? targetCapacityPass
+                ? `Pipeline uses ${timing.budget_used_percent?.toFixed(1)}% of the ${frameBudgetMs.toFixed(1)} ms frame budget. This PC can sustain the configured ${targetFps.toFixed(0)} FPS workload.`
+                : `Pipeline needs ${timing.total_ms?.toFixed(1)} ms per frame, above the ${frameBudgetMs.toFixed(1)} ms budget. Reduce workload or use faster hardware.`
               : 'Start the camera and hold a gesture to measure end-to-end processing capacity.'}</p>
           </article>
 
@@ -1119,30 +1047,25 @@ export default function Dashboard() {
                   alt="Live JPEG stream from the USB-NCM development-board camera"
                   className="camera-video active ncm-camera-video"
                 />}
-                {followActive && !successVisible && <div className="camera-instruction">{followMessage}</div>}
-                {demoVideo && faceScanActive && <div className="face-focus-overlay" aria-label="Face target action active"><i /><span>FACE TARGET ACTIVE</span></div>}
                 {demoVideo && <div className="demo-live-action" aria-live="polite">
                   <span>CONFIRMED LIVE ACTION</span>
-                  <strong>{prediction.runtime_action ?? 'Wait / No Action'}</strong>
-                  <small>{humanize(prediction.runtime_prediction)} · {percent(prediction.confidence)}</small>
+                  <strong>{prediction.runtime_action && prediction.runtime_action !== 'Wait / No Action' ? mappedLabel : 'Wait / No Action'}</strong>
+                  <small>{humanize(runtimeGesture)} · {percent(prediction.confidence)}</small>
                 </div>}
                 {demoVideo && <div className="demo-state-badges">
                   {demoRecording && <span className="recording-badge"><i /> REC</span>}
-                  {objectGrabbed && <span className="grabbed-badge">OBJECT GRABBED</span>}
+                  {objectTrackingEnabled && <span className="tracking-badge">OBJECT TRACKING ON</span>}
                 </div>}
                 {demoVideo && actionToast && <div className={`action-toast ${actionToast.status}`} role="status" aria-live="assertive">
                   <span>{humanize(actionToast.gesture)} gesture</span>
                   <strong>{actionToast.label}</strong>
-                </div>}
-                {successVisible && <div className="success-overlay" role="status" aria-live="assertive">
-                  <span>✓</span><strong>FOLLOW OBJECT<br />DONE SUCCESSFULLY</strong><p>Camera is OFF</p>
                 </div>}
                 <div className="guide-box live-guide">
                   <span className="corner top-left" /><span className="corner top-right" />
                   <span className="corner bottom-left" /><span className="corner bottom-right" />
                   <canvas ref={landmarkCanvasRef} className="landmark-canvas" />
                   {demoVideo && <div className="webcam-pip-label"><span className={`live-dot ${cameraActive ? 'is-online' : ''}`} /> NCM BOARD CAMERA + LANDMARKS</div>}
-                  {!cameraActive && !successVisible && <div className="camera-empty">
+                  {!cameraActive && <div className="camera-empty">
                     <span className="hand-orbit" /><strong>Camera is ready</strong>
                     <p>{demoVideo ? 'Connect the board camera to control the uploaded media.' : 'Connect USB-NCM and keep one complete hand and wrist inside the large guide.'}</p>
                   </div>}
@@ -1151,14 +1074,14 @@ export default function Dashboard() {
               </div>
               <div className="camera-footer">
                 <span>{demoVideo ? `Target ${demoTransform.scale.toFixed(1)}x · X ${demoTransform.x} · Y ${demoTransform.y}` : prediction.status === 'predicted' ? 'ONNX Runtime · CPU' : humanize(prediction.status)}</span>
-                <span>NCM camera {fps(cameraFps)} FPS · inference capped at {targetFps.toFixed(0)} FPS</span>
+                <span>Unmirrored NCM camera {fps(cameraFps)} FPS · inference capped at {targetFps.toFixed(0)} FPS</span>
               </div>
               {demoVideo && <div className="demo-action-console">
                 <div className="demo-console-summary">
                   <div><span>ACTION DISPATCH</span><strong>{demoEvents[0]?.command.replaceAll('_', ' ') ?? 'WAITING'}</strong></div>
                   <div className="demo-console-buttons">
                     {recordingDownloadUrl && <a href={recordingDownloadUrl} download="gesture-action-demo.webm">Download recording</a>}
-                    <button type="button" onClick={() => { updateDemoTransform(() => ({ x: 0, y: 0, scale: 1 })); setObjectGrabbed(false); setImagePreviewActive(true); }}>Reset media position</button>
+                    <button type="button" onClick={() => { updateDemoTransform(() => ({ x: 0, y: 0, scale: 1 })); setObjectTrackingEnabled(false); setImagePreviewActive(true); }}>Reset media position</button>
                   </div>
                 </div>
                 <div className="demo-event-list">
@@ -1171,33 +1094,22 @@ export default function Dashboard() {
 
             <aside className="result-stack">
               <article className="result-card accent-mint">
-                <p>RUNTIME PREDICTION</p><strong>{humanize(prediction.runtime_prediction)}</strong>
+                <p>RUNTIME PREDICTION</p><strong>{humanize(runtimeGesture)}</strong>
                 <span>{prediction.message ?? `${percent(prediction.confidence)} confidence · ${prediction.stable_frames ?? 0}/${stableRequired} stable`}</span>
               </article>
               <article className="result-card label-card" aria-live="polite">
                 <p>LABEL</p><strong>{mappedLabel}</strong>
                 <span>{prediction.runtime_prediction
-                  ? `Mapped from ${humanize(prediction.runtime_prediction)}`
+                  ? `Mapped from ${humanize(runtimeGesture)}`
                   : 'The mapped action will appear after prediction.'}</span>
               </article>
               <article className="result-card accent-orange">
-                <p>RUNTIME ACTION</p><strong>{prediction.runtime_action ?? 'Wait / No Action'}</strong>
+                <p>RUNTIME ACTION</p><strong>{prediction.runtime_action && prediction.runtime_action !== 'Wait / No Action' ? mappedLabel : 'Wait / No Action'}</strong>
                 <span>{prediction.action_reason ?? 'Confidence and stability gates are active.'}</span>
-              </article>
-              <article className="sequence-card panel">
-                <div className="panel-header"><div>FOLLOW OBJECT</div><span>{followActive ? 'ACTIVE' : 'OPT-IN'}</span></div>
-                <div className="sequence-flow">
-                  {['Palm', 'Fist', 'Palm'].map((label, index) => <span key={`${label}-${index}`} className={`sequence-node ${followActive && followStep === index ? 'current' : followStep > index ? 'done' : ''}`}>{label}</span>)}
-                </div>
-                <div className="follow-progress"><i style={{ width: `${Math.round((follow?.hold_progress ?? 0) * 100)}%` }} /></div>
-                <p className="sequence-message">{followMessage}</p>
-                <button className={followActive ? 'danger-button' : 'follow-button'} type="button" onClick={followActive ? stopFollowObject : beginFollowObject} disabled={!serverReady}>
-                  {followActive ? 'Stop procedure' : 'Begin Follow Object'}
-                </button>
               </article>
               <div className="model-control">
                 <label htmlFor="model-select">Runtime model</label>
-                <select id="model-select" value={selectedModel} onChange={changeModel} disabled={!selectableModels.length || followActive}>
+                <select id="model-select" value={selectedModel} onChange={changeModel} disabled={!selectableModels.length}>
                   {selectableModels.map((model) => <option key={model}>{model}</option>)}
                   {!selectableModels.length && <option>No model loaded</option>}
                 </select>
@@ -1221,7 +1133,7 @@ export default function Dashboard() {
                 <div><span>Effective app FPS</span><strong>{fps(timing?.effective_application_fps ?? prediction.actual_fps)}</strong></div>
                 <div><span>Uncapped pipeline</span><strong>{fps(timing?.uncapped_fps)}</strong></div>
                 <div><span>Total pipeline</span><strong>{milliseconds(timing?.total_ms)}</strong></div>
-                <div><span>Frame budget</span><strong>{milliseconds(timing?.frame_budget_ms ?? 100)}</strong></div>
+                <div><span>Frame budget</span><strong>{milliseconds(frameBudgetMs)}</strong></div>
                 <div><span>Budget used</span><strong>{timing?.budget_used_percent == null ? '—' : `${timing.budget_used_percent.toFixed(1)}%`}</strong></div>
                 <div><span>Headroom</span><strong>{milliseconds(timing?.headroom_ms)}</strong></div>
               </div>
@@ -1236,7 +1148,7 @@ export default function Dashboard() {
           </div>
           <div className="analytics-grid">
             <article className="panel summary-panel">
-              <div className="panel-header"><div>10 FPS SUMMARY</div><span>END-TO-END</span></div>
+              <div className="panel-header"><div>{targetFps.toFixed(0)} FPS SUMMARY</div><span>END-TO-END</span></div>
               <div className="summary-metrics">
                 <div><span>Verdict</span><strong className={pipelineVerdict === 'PASS' ? 'text-pass' : 'text-warn'}>{pipelineVerdict}</strong></div>
                 <div><span>Runtime model</span><strong>{(prediction.model ?? selectedModel) || '—'}</strong></div>
@@ -1278,34 +1190,58 @@ export default function Dashboard() {
 
         {activeTab === 'feedback' && <>
           <div className="section-heading">
-            <div><p className="eyebrow">REVIEWED FEEDBACK DATASET</p><h2>Correct, capture, retrain later</h2></div>
-            <span className="count-pill">{feedbackCount} reviewed samples</span>
+            <div><p className="eyebrow">GUARDED ONLINE LEARNING</p><h2>Correct, capture, and safely learn</h2></div>
+            <div className="feedback-heading-actions">
+              <span className="count-pill">{feedbackCount} reviewed samples</span>
+              <button className="primary-button" type="button" onClick={toggleCamera} disabled={!serverReady}>
+                {cameraActive ? 'Disconnect board camera' : 'Connect board camera'}
+              </button>
+            </div>
           </div>
           <div className="feedback-layout">
             <article className="panel feedback-preview">
-              <div className="panel-header"><div>LAST PREDICTION</div><span>{prediction.model ?? 'NO MODEL'}</span></div>
-              <div className="feedback-prediction"><p>The system predicted</p><strong>{humanize(prediction.runtime_prediction)}</strong><span>{percent(prediction.confidence)} confidence</span></div>
-              <div className="feedback-note"><strong>Immutable deployment graph</strong><p>ONNX Runtime performs inference only. Corrections, the 76-D feature vector, landmarks, and snapshots are saved so the model can be retrained offline and exported as a new qualified ONNX file.</p></div>
+              <div className="panel-header"><div><span className={`live-dot ${cameraActive ? 'is-online' : ''}`} /> LIVE FEEDBACK CAMERA</div><span>{cameraActive ? `${fps(cameraFps)} FPS` : 'OFFLINE'}</span></div>
+              <div className="camera-stage live-stage feedback-camera-stage">
+                {cameraActive && <img
+                  key={`feedback-${streamRevision}`}
+                  src={`${API_URL}/api/ncm/stream.mjpg?revision=${streamRevision}`}
+                  alt="Unmirrored live JPEG stream from the USB-NCM development-board camera"
+                  className="camera-video active ncm-camera-video feedback-camera-video"
+                />}
+                <div className="guide-box live-guide feedback-live-guide">
+                  <span className="corner top-left" /><span className="corner top-right" />
+                  <span className="corner bottom-left" /><span className="corner bottom-right" />
+                  <canvas ref={feedbackLandmarkCanvasRef} className="landmark-canvas" />
+                  {!cameraActive && <div className="camera-empty">
+                    <span className="hand-orbit" /><strong>Camera stays available here</strong>
+                    <p>Connect the NCM camera, show a gesture, then confirm or correct the result beside the preview.</p>
+                  </div>}
+                </div>
+              </div>
+              <div className="camera-footer"><span>Unmirrored preview + live landmarks</span><span>{connection === 'online' ? 'Feedback capture ready' : 'Connect to capture'}</span></div>
+              <div className="feedback-prediction"><p>The system predicted</p><strong>{humanize(feedbackPrediction)}</strong><span>{percent(prediction.confidence)} confidence · {prediction.stable_frames ?? 0}/{stableRequired} stable</span></div>
+              <div className="feedback-note"><strong>Safe Learn is guarded</strong><p>Each confirmed sample includes the current snapshot, landmarks, and feature vector. The server validates an online candidate before accepting it and keeps the deployed model when validation fails.</p></div>
               <div className="online-status-grid">
-                <div><span>Runtime</span><strong>ONNX CPU</strong></div>
-                <div><span>Parity</span><strong>{qualification?.onnx_parity?.passed ? 'Passed' : 'Needs review'}</strong></div>
-                <div><span>Agreement</span><strong>{qualification?.onnx_parity?.prediction_agreement == null ? '—' : percent(qualification.onnx_parity.prediction_agreement)}</strong></div>
-                <div><span>Saved feedback</span><strong>{feedbackCount}</strong></div>
+                <div><span>Safe learner</span><strong>{onlineLearning?.ready ? 'Ready' : 'Needs setup'}</strong></div>
+                <div><span>Accepted updates</span><strong>{onlineLearning?.accepted_updates ?? 0}</strong></div>
+                <div><span>Rejected updates</span><strong>{onlineLearning?.rejected_updates ?? 0}</strong></div>
+                <div><span>Validation macro F1</span><strong>{onlineLearning?.validation_macro_f1 == null ? '—' : percent(onlineLearning.validation_macro_f1)}</strong></div>
               </div>
             </article>
 
             <article className="panel feedback-form">
               <div className="panel-header"><div>CORRECT THE LABEL</div><span>USER CONFIRMATION REQUIRED</span></div>
               <div className="form-body">
-                <label>Actual gesture<select value={actualLabel} onChange={(event) => setActualLabel(event.target.value)}>
-                  {classNames.map((name) => <option key={name} value={name}>{humanize(name)} — {actionMap[name]}</option>)}
+                <label>Actual gesture<select value={selectedFeedbackLabel} onChange={(event) => setActualLabel(event.target.value)}>
+                  {feedbackLabels.map((name) => <option key={name} value={name}>{name === 'no_gesture' ? 'No Gesture — reject false detection' : `${humanize(name)} — ${actionMap[name]}`}</option>)}
                 </select></label>
-                <label>Feedback action<select value={learningMode} disabled>
-                  <option value="audit">Save for offline retraining</option>
+                <label>Feedback action<select value={learningMode} onChange={(event) => setLearningMode(event.target.value as LearningMode)}>
+                  <option value="safe">Safe Learn — validate and update</option>
+                  <option value="audit">Save only — no model update</option>
                 </select></label>
                 <label>Reviewer note<textarea value={feedbackNote} onChange={(event) => setFeedbackNote(event.target.value)} placeholder="Describe lighting, angle, occlusion, or the confusion you observed." rows={4} /></label>
-                <div className="form-details"><span>Prediction: {humanize(prediction.runtime_prediction)}</span><span>Snapshot: {snapshotReady ? 'ready' : 'not captured'}</span><span>76-D features: {prediction.feature_vector?.length === 76 ? 'ready' : 'not available'}</span></div>
-                <button className="primary-button wide" type="button" onClick={submitFeedback} disabled={!prediction.runtime_prediction}>Save reviewed feedback</button>
+                <div className="form-details"><span>Prediction: {humanize(feedbackPrediction)}</span><span>Snapshot: {snapshotReady ? 'ready' : 'not captured'}</span><span>76-D features: {prediction.feature_vector?.length === 76 ? 'ready' : 'not available'}</span><span>Camera: {cameraActive ? 'running' : 'offline'}</span></div>
+                <button className="primary-button wide" type="button" onClick={submitFeedback} disabled={!prediction.runtime_prediction}>{learningMode === 'safe' ? 'Confirm feedback & safely learn' : 'Save reviewed feedback only'}</button>
                 {feedbackMessage && <p className="form-message">{feedbackMessage}</p>}
               </div>
             </article>
@@ -1340,7 +1276,7 @@ export default function Dashboard() {
                 <div><dt>Pipeline p50</dt><dd>{milliseconds(runtimeSummary?.timing?.total_ms?.p50)}</dd></div>
                 <div><dt>Pipeline p95</dt><dd>{milliseconds(runtimeSummary?.timing?.total_ms?.p95)}</dd></div>
                 <div><dt>Pipeline p99</dt><dd>{milliseconds(runtimeSummary?.timing?.total_ms?.p99)}</dd></div>
-                <div><dt>10 FPS budget pass</dt><dd>{percent(runtimeSummary?.ten_fps_budget_pass_rate)}</dd></div>
+                <div><dt>{targetFps.toFixed(0)} FPS budget pass</dt><dd>{percent(targetBudgetPassRate)}</dd></div>
                 <div><dt>Error rate</dt><dd>{percent(runtimeSummary?.error_rate)}</dd></div>
                 <div><dt>Sessions active / peak</dt><dd>{runtimeSummary?.active_sessions ?? 0} / {runtimeSummary?.peak_sessions ?? 0}</dd></div>
               </dl>
@@ -1361,7 +1297,7 @@ export default function Dashboard() {
                 <li><span>01</span><div><strong>Install the Microsoft runtime</strong><p>Install the Microsoft Visual C++ 2015–2022 x64 Redistributable required by ONNX Runtime on Windows.</p></div></li>
                 <li><span>02</span><div><strong>Configure the NCM link</strong><p>The Windows NCM adapter must own 192.168.50.1/30 and the board must answer as 192.168.50.2.</p></div></li>
                 <li><span>03</span><div><strong>Run the separate application</strong><p>Double-click start_ncm_onnx_dashboard.bat. Services use ports 3200 and 8200.</p></div></li>
-                <li><span>04</span><div><strong>Discover, connect, and test</strong><p>Run UDP discovery, connect the board camera, then verify the 10 FPS frame budget.</p></div></li>
+                <li><span>04</span><div><strong>Discover, connect, and test</strong><p>Run UDP discovery, connect the board camera, then verify the {targetFps.toFixed(0)} FPS frame budget.</p></div></li>
               </ol>
             </article>
 
@@ -1380,13 +1316,13 @@ export default function Dashboard() {
             <article className="panel runtime-contract">
               <div className="panel-header"><div>ONNX RUNTIME CONTRACT</div><span>EXACT</span></div>
               <dl>
-                <div><dt>Inference limit</dt><dd>{targetFps} FPS / 100 ms</dd></div>
+                <div><dt>Inference limit</dt><dd>{targetFps} FPS / {frameBudgetMs.toFixed(1)} ms</dd></div>
                 <div><dt>Taxonomy</dt><dd>{classNames.length} classes</dd></div>
                 <div><dt>Feature vector</dt><dd>76 dimensions</dd></div>
                 <div><dt>Execution provider</dt><dd>CPUExecutionProvider</dd></div>
                 <div><dt>Temporal filter</dt><dd>EMA α {health?.config.ema_alpha ?? 0.65}</dd></div>
                 <div><dt>Confidence floor</dt><dd>{percent(health?.config.confidence_floor ?? 0.70)}</dd></div>
-                <div><dt>Follow Object</dt><dd>Palm → Fist → Palm</dd></div>
+                <div><dt>Object tracking</dt><dd>Toggled by Open Palm</dd></div>
               </dl>
             </article>
 

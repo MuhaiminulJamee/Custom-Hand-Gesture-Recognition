@@ -1,49 +1,62 @@
 {
   "artifacts": {
+    "eight_gesture_classification_report.csv": {
+      "bytes": 566,
+      "sha256": "55349192223ae6a2a2dcc2bc836e136132112589fba25bfad17bab60d0c78cfd"
+    },
+    "eight_gesture_confusion_matrix.csv": {
+      "bytes": 248,
+      "sha256": "85bab5944926eec1cd45f017656bc0b42e5add3659e1440269b400979e140713"
+    },
+    "eight_gesture_hard_case_metrics.csv": {
+      "bytes": 276,
+      "sha256": "dfb911c841df81b9602ec79e089bbdc2a1cba940b7627f49a8ea1c20f26239c2"
+    },
+    "eight_gesture_test_metrics.csv": {
+      "bytes": 334,
+      "sha256": "040bdc7cf7a4945efbcbb2407980d1fa064aab2765663e74a4fdb3c3cc8dca64"
+    },
     "gesture_mlp_onnx_metadata.json": {
-      "bytes": 4346,
-      "sha256": "21bfa64a36c97e1a1fa4d8ca09a13cd74d33e74dcb6a1df8481a8b05f5703e0f"
+      "bytes": 4539,
+      "sha256": "f2728e5bcd23bc2a274df47ec6a41274f8e962e208b02869de93980ba68ae237"
     },
     "gesture_mlp_production.onnx": {
-      "bytes": 78511,
-      "sha256": "e0600df46db4be4c5dbe4ae26a3b376ca8435abaf3dea18768b37ea4703ae117"
+      "bytes": 79107,
+      "sha256": "faa40884add797e109ce5f2f702d3ab497175cb3a8270e51b1fc5cc78a4e732a"
     },
     "gesture_mobile_runtime_config.json": {
-      "bytes": 8384,
-      "sha256": "b2d9b35b13bd66cddd363970e768414128e5d44fcd790b46a4ab051ae1aeb292"
+      "bytes": 6735,
+      "sha256": "c5ac440d0fadfc78467c547abf64b272f2d7db25835b161608e23cf773065410"
+    },
+    "gesture_online_replay_cache.npz": {
+      "bytes": 504873,
+      "sha256": "7f3ccf61d5a6dcd84ce159d9e1a7df7dc60ec0934bd2a07cb30c599ad314ab6b"
+    },
+    "gesture_online_untouched_test_cache.npz": {
+      "bytes": 1178888,
+      "sha256": "ceb2d8b502e3570a96fb0c0bbfe9773a8af151106ecb97deda31f37c3828bf53"
+    },
+    "gesture_online_validation_cache.npz": {
+      "bytes": 1151531,
+      "sha256": "b79a121bd63b2d6f9913449b404b95de678b32e609eadac1c0eb0d33938c910a"
     },
     "hand_landmarker.task": {
       "bytes": 7819105,
       "sha256": "fbc2a30080c3c557093b5ddfc334698132eb341044ccee322ccf8bcf3607cde1"
-    },
-    "mediapipe_hagrid_rps_pinch15_hagrid_fist_follow_object_classification_report.csv": {
-      "bytes": 1308,
-      "sha256": "368406c2827b006b7063887fb4ef3d31eb0b85c4832413a53df586a13a3921c3"
-    },
-    "mediapipe_hagrid_rps_pinch15_hagrid_fist_follow_object_test_metrics.csv": {
-      "bytes": 472,
-      "sha256": "35b6c73426a0a3147ce15755744ea1ea50034fb200906621c4a69066c5bdca57"
     }
   },
   "class_names": [
-    "call",
-    "rock",
+    "left",
+    "right",
+    "up",
+    "down",
+    "open_palm",
     "like",
-    "ok",
-    "one",
-    "one_down",
-    "one_left",
-    "one_right",
-    "palm",
-    "peace",
-    "dorsal_hand",
-    "fist",
-    "zoom_in",
-    "zoom_out",
-    "no_gesture"
+    "dorsal",
+    "ok"
   ],
-  "created_utc": "2026-09-03T05:28:06.643363+00:00",
+  "created_utc": "2026-09-05T04:25:34.742649+00:00",
   "feature_count": 76,
-  "release_fingerprint": "e995ef6511afe17fc05b4c0c04d33fdff163264b6ad5bd7392fd2d0f0a3458ca",
+  "release_fingerprint": "3b95673649d55dd6f485861c78f0b83aa87817404f4cd1d21577ea8539da9d2c",
   "schema_version": 1
 }

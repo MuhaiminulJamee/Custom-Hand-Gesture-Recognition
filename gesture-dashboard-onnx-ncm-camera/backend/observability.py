@@ -100,7 +100,10 @@ class RuntimeMetrics:
             if action and action != "Wait / No Action":
                 self.actions_total += 1
                 self._actions[str(action)] += 1
-            if timing.get("ten_fps_capacity_pass") is True:
+            if timing.get(
+                "target_fps_capacity_pass",
+                timing.get("ten_fps_capacity_pass"),
+            ) is True:
                 self.budget_pass_total += 1
             for name, values in self._timings.items():
                 value = timing.get(name)
@@ -131,6 +134,8 @@ class RuntimeMetrics:
                 "errors_total": self.errors_total,
                 "error_rate": self.errors_total / frames if frames else 0.0,
                 "budget_pass_total": self.budget_pass_total,
+                "target_fps_budget_pass_rate": self.budget_pass_total / frames if frames else 0.0,
+                # Backward-compatible API alias for older dashboard clients.
                 "ten_fps_budget_pass_rate": self.budget_pass_total / frames if frames else 0.0,
                 "actions_total": self.actions_total,
                 "active_sessions": self.active_sessions,
@@ -161,7 +166,8 @@ class RuntimeMetrics:
             f"gesture_pipeline_total_ms{{quantile=\"0.50\"}} {total['p50'] or 0.0}",
             f"gesture_pipeline_total_ms{{quantile=\"0.95\"}} {total['p95'] or 0.0}",
             f"gesture_pipeline_total_ms{{quantile=\"0.99\"}} {total['p99'] or 0.0}",
-            "# TYPE gesture_ten_fps_budget_pass_rate gauge",
-            f"gesture_ten_fps_budget_pass_rate {values['ten_fps_budget_pass_rate']}",
+            "# HELP gesture_target_fps_budget_pass_rate Fraction of frames within the configured frame budget.",
+            "# TYPE gesture_target_fps_budget_pass_rate gauge",
+            f"gesture_target_fps_budget_pass_rate {values['target_fps_budget_pass_rate']}",
         ]
         return "\n".join(lines) + "\n"

@@ -1,7 +1,8 @@
 import numpy as np
 
 from backend.config import RuntimeConfig
-from backend.model_runtime import InferenceEngine
+from backend.model_runtime import InferenceEngine, ModelManager, RuntimeSession
+from backend.online_learning import OnlineLearningAdapter
 from backend.runtime import TemporalGate, probability_ema
 
 
@@ -12,35 +13,120 @@ def test_probability_ema_keeps_rows_normalized():
     assert rows[-1, 0] > rows[-1, 1]
 
 
-def test_temporal_gate_requires_three_stable_frames():
+def test_temporal_gate_requires_stability_confidence_margin_and_hold_time():
     config = RuntimeConfig()
     gate = TemporalGate(config)
     row = np.zeros(len(config.class_names), dtype=np.float64)
-    row[config.class_to_idx["call"]] = 0.95
-    row[config.class_to_idx["no_gesture"]] = 0.05
+    row[config.class_to_idx["left"]] = 0.95
+    row[config.class_to_idx["right"]] = 0.05
     first = gate.update(row, now=1.0)
     second = gate.update(row, now=1.1)
-    third = gate.update(row, now=1.2)
+    gate.update(row, now=1.2)
+    gate.update(row, now=1.3)
+    fifth = gate.update(row, now=1.4)
     assert first.execute is False
     assert second.execute is False
-    assert third.execute is True
-    assert third.predicted_gesture == "call"
+    assert fifth.execute is True
+    assert fifth.predicted_gesture == "left"
 
 
-def test_negative_class_never_executes():
+def test_temporal_hold_time_handles_zero_timestamp():
+    config = RuntimeConfig(stable_frames_required=2, minimum_hold_seconds=0.10)
+    gate = TemporalGate(config)
+    row = np.zeros(len(config.class_names), dtype=np.float64)
+    row[config.class_to_idx["left"]] = 1.0
+
+    first = gate.update(row, now=0.0)
+    second = gate.update(row, now=0.20)
+
+    assert first.execute is False
+    assert second.held_seconds == 0.20
+    assert second.execute is True
+
+
+def test_action_latch_requires_configured_consecutive_release_frames():
+    config = RuntimeConfig(release_frames_required=3)
+    session = RuntimeSession(config)
+    session.last_action_gesture = "like"
+
+    assert session.observe_action_release(None) is False
+    assert session.observe_action_release(None) is False
+    assert session.last_action_gesture == "like"
+    # Seeing the held gesture again cancels a transient release sequence.
+    assert session.observe_action_release("like") is False
+    assert session.observe_action_release(None) is False
+    assert session.observe_action_release(None) is False
+    assert session.observe_action_release(None) is True
+    assert session.last_action_gesture is None
+
+
+def test_open_set_rejection_never_executes():
     config = RuntimeConfig()
     gate = TemporalGate(config)
     row = np.zeros(len(config.class_names), dtype=np.float64)
-    row[config.class_to_idx["no_gesture"]] = 1.0
-    decision = None
-    for index in range(5):
-        decision = gate.update(row, now=float(index))
-    assert decision is not None
+    row[config.class_to_idx["left"]] = 1.0
+    decision = gate.update(row, now=1.0, known_gesture_mass=0.1)
     assert decision.execute is False
-    assert decision.reason == "negative class"
+    assert decision.predicted_gesture == "no_gesture"
+    assert decision.reason == "outside the eight-gesture vocabulary"
 
 
-def test_ten_fps_budget_verdict_uses_total_pipeline_time():
+def test_nonfinite_classifier_evidence_fails_closed():
+    config = RuntimeConfig()
+    row = np.full(len(config.class_names), 1.0 / len(config.class_names))
+    row[0] = np.nan
+
+    decision = TemporalGate(config).update(row, known_gesture_mass=np.nan)
+
+    assert decision.execute is False
+    assert decision.predicted_gesture == config.reject_label
+    assert decision.reason == "invalid classifier probabilities"
+    assert all(np.isfinite(list(decision.probabilities.values())))
+
+
+def test_reviewed_negative_feedback_reaches_runtime_known_mass(tmp_path):
+    config = RuntimeConfig()
+    feature = np.zeros(len(config.feature_names), dtype=np.float32)
+    probabilities = np.full(len(config.class_names), 0.01, dtype=np.float64)
+    probabilities[config.class_to_idx["left"]] = 0.93
+    probabilities /= probabilities.sum()
+
+    class Classifier:
+        classes_ = np.arange(len(config.class_names), dtype=int)
+
+        def predict_with_quality(self, features):
+            return (
+                np.repeat(probabilities[None, :], len(features), axis=0),
+                np.full((len(features),), 0.95, dtype=np.float64),
+            )
+
+    manager = ModelManager(config, tmp_path, load_models=False)
+    manager.models["ONNX"] = Classifier()
+    manager.selected_model_name = "ONNX"
+    adapter = OnlineLearningAdapter(config, models_directory=tmp_path)
+    update = adapter.learn(
+        feature,
+        config.reject_label,
+        probabilities=probabilities,
+    )
+    assert update["status"] == "accepted"
+    manager.set_online_adapter(adapter)
+
+    adapted, _, _, quality = manager.predict_detailed(feature)
+
+    assert np.allclose(adapted, probabilities)
+    assert quality["online_adapter_applied"] is True
+    assert quality["known_gesture_mass"] < config.known_mass_floor
+    decision = TemporalGate(config).update(
+        adapted,
+        now=1.0,
+        known_gesture_mass=quality["known_gesture_mass"],
+    )
+    assert decision.predicted_gesture == config.reject_label
+    assert decision.execute is False
+
+
+def test_configured_fps_budget_verdict_uses_total_pipeline_time():
     engine = InferenceEngine.__new__(InferenceEngine)
     engine.config = RuntimeConfig(target_fps=10.0)
     passing = engine._timing(
@@ -52,6 +138,7 @@ def test_ten_fps_budget_verdict_uses_total_pipeline_time():
         effective_fps=10.0,
     )
     assert passing["ten_fps_capacity_pass"] is True
+    assert passing["target_fps_capacity_pass"] is True
     assert passing["verdict"] == "PASS"
     assert abs(passing["uncapped_fps"] - 16.218) < 0.01
     assert abs(passing["budget_used_percent"] - 61.66) < 0.01
@@ -65,4 +152,5 @@ def test_ten_fps_budget_verdict_uses_total_pipeline_time():
         effective_fps=9.0,
     )
     assert failing["ten_fps_capacity_pass"] is False
+    assert failing["target_fps_capacity_pass"] is False
     assert failing["verdict"] == "FAIL"

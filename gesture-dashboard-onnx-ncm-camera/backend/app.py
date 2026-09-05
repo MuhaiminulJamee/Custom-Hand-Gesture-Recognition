@@ -34,6 +34,7 @@ from .config import (
 from .model_runtime import InferenceEngine, RuntimeSession
 from .ncm_camera import NcmCameraClient, NcmCameraConfig
 from .observability import RuntimeMetrics, configure_logging
+from .online_learning import OnlineLearningService
 from .storage import FeedbackRecord, FeedbackStore, artifact_status, load_metric_files
 
 
@@ -52,11 +53,16 @@ class FeedbackPayload(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
     model_name: str = "unknown"
     probabilities: dict[str, float] = Field(default_factory=dict)
+    base_probabilities: dict[str, float] | None = None
     feature_vector: list[float] | None = None
     landmarks: list[list[float]] | None = None
     note: str = Field(default="", max_length=500)
     snapshot_data_url: str | None = None
     learning_mode: Literal["audit", "safe", "force"] = "audit"
+
+
+class OnlineRollbackPayload(BaseModel):
+    backup_name: str = Field(min_length=1, max_length=255)
 
 
 production_settings: ProductionSettings = load_production_settings()
@@ -71,6 +77,7 @@ def _build_services() -> tuple[
     RuntimeConfig,
     InferenceEngine,
     FeedbackStore,
+    OnlineLearningService,
 ]:
     global configuration_error
     errors: list[str] = []
@@ -90,10 +97,17 @@ def _build_services() -> tuple[
         inference_engine.model_manager.errors[:0] = errors
     configuration_error = " · ".join(errors) if errors else None
     store = FeedbackStore(config)
-    return config, inference_engine, store
+    learning = OnlineLearningService(
+        config,
+        inference_engine.model_manager,
+        MODELS_DIRECTORY,
+        require_holdout_for_safe=True,
+    )
+    inference_engine.model_manager.set_online_adapter(learning)
+    return config, inference_engine, store, learning
 
 
-runtime_config, engine, feedback_store = _build_services()
+runtime_config, engine, feedback_store, online_learning = _build_services()
 ncm_camera = NcmCameraClient(NcmCameraConfig.from_environment())
 action_history: deque[dict[str, Any]] = deque(maxlen=500)
 active_sessions: dict[str, RuntimeSession] = {}
@@ -110,7 +124,7 @@ async def application_lifespan(_: FastAPI):
 
 app = FastAPI(
     title="Gesture Control Lab ONNX + NCM Camera API",
-    version="1.0.0",
+    version="2.0.0",
     description=(
         "Independent MediaPipe + ONNX Runtime deployment for the JLIP camera "
         "stream delivered by the USB-NCM development board."
@@ -190,12 +204,40 @@ def _onnx_qualification() -> dict[str, Any]:
             "current": False,
             "pc_release_ready": False,
             "selected_model": "ONNX",
-            "deferred_classes": ["no_gesture"],
+            "deferred_classes": [],
             "failing_gated_classes": [],
             "message": f"ONNX metadata is unavailable: {error}",
         }
     parity = metadata.get("parity") or {}
-    passed = bool(parity.get("passed"))
+    quality = metadata.get("quality") or {}
+    open_set = metadata.get("open_set_rejection") or {}
+    hard_cases = metadata.get("hard_case_metrics") or {}
+    exact_contract = metadata.get("output_class_order") == runtime_config.class_names
+    gates = {
+        "exact_eight_class_contract": exact_contract,
+        "onnx_parity": bool(parity.get("passed")),
+        "accuracy_at_least_0_985": float(quality.get("accuracy", 0.0)) >= 0.985,
+        "macro_f1_at_least_0_98": float(quality.get("macro_f1", 0.0)) >= 0.98,
+        "minimum_class_f1_at_least_0_97": (
+            float(quality.get("minimum_per_class_f1", 0.0)) >= 0.97
+        ),
+        "known_acceptance_at_least_0_96": (
+            float(open_set.get("known_acceptance_rate", 0.0)) >= 0.96
+        ),
+        "unknown_false_acceptance_at_most_0_03": (
+            float(open_set.get("unknown_false_acceptance_rate", 1.0)) <= 0.03
+        ),
+        "rock_false_acceptance_at_most_0_01": (
+            float(hard_cases.get("rock_false_acceptance_rate", 1.0)) <= 0.01
+        ),
+        "dorsal_as_down_at_most_0_01": (
+            float(hard_cases.get("dorsal_as_down_rate", 1.0)) <= 0.01
+        ),
+        "down_as_dorsal_at_most_0_01": (
+            float(hard_cases.get("down_as_dorsal_rate", 1.0)) <= 0.01
+        ),
+    }
+    passed = all(gates.values())
     return {
         "status": "passed" if passed else "failed",
         "current": passed,
@@ -204,22 +246,26 @@ def _onnx_qualification() -> dict[str, Any]:
         "format": "ONNX",
         "created_utc": metadata.get("created_utc"),
         "source_model": metadata.get("model_name"),
-        "deferred_classes": list(
-            (metadata.get("source_selection") or {}).get(
-                "deferred_classes", ["no_gesture"]
-            )
-        ),
+        "class_names": metadata.get("output_class_order"),
+        "deferred_classes": [],
+        "failing_gates": [name for name, value in gates.items() if not value],
         "failing_gated_classes": [],
+        "gates": gates,
+        "quality": quality,
+        "open_set_rejection": open_set,
+        "hard_case_metrics": hard_cases,
+        "gated_macro_f1": quality.get("macro_f1"),
+        "gated_minimum_per_class_f1": quality.get("minimum_per_class_f1"),
         "onnx_parity": parity,
         "prediction_agreement": parity.get("prediction_agreement"),
         "maximum_absolute_probability_error": parity.get(
             "maximum_absolute_probability_error"
         ),
         "message": (
-            "The ONNX graph passed conversion parity and is loaded directly by "
-            "ONNX Runtime."
+            "The exact eight-command ONNX graph passed parity, accuracy, and "
+            "open-set rejection gates."
             if passed
-            else "The ONNX conversion parity gate did not pass."
+            else "One or more ONNX release qualification gates did not pass."
         ),
     }
 
@@ -234,6 +280,7 @@ def current_health() -> dict[str, Any]:
         and (integrity["verified"] or not production_settings.require_artifact_manifest)
     )
     release = _onnx_qualification()
+    learning_status = online_learning.status()
     return {
         "status": "ready" if operational_ready else "setup_required",
         "operational_ready": operational_ready,
@@ -242,16 +289,8 @@ def current_health() -> dict[str, Any]:
         "artifacts": artifact_status(),
         "artifact_integrity": integrity,
         "online_learning": {
-            "ready": False,
-            "accepted_updates": 0,
-            "forced_updates": 0,
-            "rejected_updates": 0,
-            "force_learning_enabled": False,
-            "backup_count": 0,
-            "tflite_policy": (
-                "ONNX deployment graphs are immutable. Reviewed feedback is saved "
-                "for a later offline retraining and re-export cycle."
-            ),
+            **learning_status,
+            "tflite_policy": learning_status["policy"],
         },
         "production": {
             **production_settings.public_dict(),
@@ -414,23 +453,59 @@ def save_feedback(payload: FeedbackPayload) -> dict[str, Any]:
     try:
         values = payload.model_dump()
         learning_mode = values.pop("learning_mode")
+        base_probabilities = values.pop("base_probabilities")
+        if learning_mode == "force":
+            raise PermissionError(
+                "Force learning is disabled; only validation-gated safe updates are allowed."
+            )
+        if learning_mode == "safe" and values.get("feature_vector") is None:
+            raise ValueError("Safe learning requires a captured 76-D feature vector.")
         saved = feedback_store.save(FeedbackRecord(**values))
-        update: dict[str, Any] = {
-            "status": "audit_only" if learning_mode == "audit" else "disabled",
-            "message": (
-                "Feedback saved for the next offline retraining and ONNX re-export cycle."
-                if learning_mode == "audit"
-                else "Feedback was saved, but a deployed ONNX graph cannot learn in place."
-            ),
-        }
+        if learning_mode == "audit":
+            update: dict[str, Any] = {
+                "status": "audit_only",
+                "message": "Reviewed feedback saved without changing the live adapter.",
+            }
+        else:
+            supplied_probabilities = base_probabilities or values["probabilities"] or None
+            try:
+                update = online_learning.learn(
+                    values["feature_vector"],
+                    values["actual_label"],
+                    probabilities=supplied_probabilities,
+                    mode="safe",
+                    reviewed=True,
+                )
+            except (ValueError, TypeError, OSError, RuntimeError) as error:
+                # The reviewed record was already committed. Report the adapter
+                # failure in-band so clients do not retry and duplicate feedback.
+                update = {
+                    "status": "error",
+                    "message": "Feedback was saved, but the safe update failed: " + str(error),
+                }
         return {**saved, "learning_mode": learning_mode, "online_update": update}
+    except PermissionError as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
     except (ValueError, TypeError, OSError, RuntimeError) as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
 
 
 @app.get("/api/online-learning/backups")
 def online_backups() -> dict[str, Any]:
-    return {"count": 0, "backups": [], "message": "ONNX runtime is immutable."}
+    backups = online_learning.list_backups()
+    return {"count": len(backups), "backups": backups}
+
+
+@app.post("/api/online-learning/rollback")
+def rollback_online_adapter(
+    payload: OnlineRollbackPayload,
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, Any]:
+    _admin_allowed(production_settings.allow_artifact_reload, x_admin_token)
+    try:
+        return online_learning.rollback(payload.backup_name)
+    except (ValueError, FileNotFoundError, OSError, RuntimeError) as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
 
 
 @app.post("/api/predict-image")
@@ -461,11 +536,11 @@ async def predict_image(
 async def reload_artifacts(
     x_admin_token: str | None = Header(default=None),
 ) -> dict[str, Any]:
-    global runtime_config, engine, feedback_store
+    global runtime_config, engine, feedback_store, online_learning
     _admin_allowed(production_settings.allow_artifact_reload, x_admin_token)
     async with service_lock:
         old_engine = engine
-        runtime_config, engine, feedback_store = _build_services()
+        runtime_config, engine, feedback_store, online_learning = _build_services()
         for session in active_sessions.values():
             session.reset()
         old_engine.close()

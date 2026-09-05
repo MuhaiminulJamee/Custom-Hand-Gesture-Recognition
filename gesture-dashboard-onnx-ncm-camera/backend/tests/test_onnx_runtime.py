@@ -18,6 +18,10 @@ def test_artifact_manifest_and_onnx_metadata_are_current():
     assert metadata["format"] == "ONNX"
     assert metadata["parity"]["passed"] is True
     assert metadata["parity"]["prediction_agreement"] >= 0.99
+    assert metadata["output_class_order"] == [
+        "left", "right", "up", "down", "open_palm", "like", "dorsal", "ok"
+    ]
+    assert metadata["known_mass_output"] == "known_gesture_mass"
 
 
 def test_model_manager_loads_only_qualified_onnx_runtime():
@@ -33,8 +37,28 @@ def test_model_manager_loads_only_qualified_onnx_runtime():
     assert probabilities.shape == (len(config.class_names),)
     assert np.isfinite(probabilities).all()
     assert np.isclose(probabilities.sum(), 1.0)
+    _, _, _, quality = manager.predict_detailed(
+        np.zeros(len(config.feature_names), dtype=np.float32)
+    )
+    assert 0.0 <= quality["known_gesture_mass"] <= 1.0
 
 
 def test_handover_folder_contains_no_python_pickle_model():
     assert not list(MODELS_DIRECTORY.glob("*.joblib"))
     assert not list(MODELS_DIRECTORY.glob("*.pkl"))
+
+
+def test_open_set_output_stays_finite_when_retained_mass_underflows():
+    config = load_runtime_config()
+    classifier = ModelManager(config).models["ONNX"]
+    rows = np.vstack([
+        np.full((1, len(config.feature_names)), value, dtype=np.float32)
+        for value in (-1e6, -1e3, 1e3, 1e6)
+    ])
+
+    probabilities, known_mass = classifier.predict_with_quality(rows)
+
+    assert np.isfinite(probabilities).all()
+    assert np.isfinite(known_mass).all()
+    assert np.allclose(probabilities.sum(axis=1), 1.0)
+    assert ((known_mass >= 0.0) & (known_mass <= 1.0)).all()
