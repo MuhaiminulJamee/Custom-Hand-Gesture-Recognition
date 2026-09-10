@@ -168,7 +168,8 @@ def evaluate(probabilities, mass, data, config=None, geometry=True):
             valid[i] = details['pose_validation']['valid']
             geometry_supported[i] = details['pose_validation'].get('geometry_supported', False)
     ordered = np.sort(resolved, axis=1)
-    accepted = valid & ((mass >= config.known_mass_floor) | geometry_supported) & (ordered[:, -1] >= config.confidence_floor) & ((ordered[:, -1] - ordered[:, -2]) >= config.probability_margin_floor)
+    support_allowed = geometry_supported & ((resolved.argmax(1) == 6) | (mass >= .50))
+    accepted = valid & ((mass >= config.known_mass_floor) | support_allowed) & (ordered[:, -1] >= config.confidence_floor) & ((ordered[:, -1] - ordered[:, -2]) >= config.probability_margin_floor)
     predicted = np.where(accepted, resolved.argmax(1), 8)
     truth = np.where(data['y'] < 0, 8, data['y'])
     known = truth < 8

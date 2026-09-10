@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from backend.hand_detection import HandDetector, hand_pixel_metrics, restore_points
+from backend.hand_detection import HandDetector, hand_pixel_metrics, normalized_hand_shape, restore_points
 from backend.model_runtime import RuntimeSession
 from backend.config import RuntimeConfig
 from backend.tests.test_camera_stability import representative_hand
@@ -46,6 +46,8 @@ def simulated_detector():
     detector._shape = detector._view = None
     detector._search_index = detector._misses = detector._unqualified_frames = 0
     detector._recovery_tracking = detector._pose_recovery_requested = False
+    detector._pending_recovery = detector._accepted_points = detector._accepted_view = None
+    detector._pending_recovery_count = 0
     return detector
 
 
@@ -58,11 +60,27 @@ def test_recovery_can_replace_bad_tracked_fingers_with_new_image_evidence(monkey
         calls.append(video)
         return (.10, initial if video else recovered, None)
     monkeypatch.setattr(detector, '_run_view', run)
+    scorer = lambda points: float(points[0, 0] < .45)
     result = detector.detect(np.zeros((640, 640, 3), dtype=np.uint8),
-                             candidate_score=lambda points: float(points[0, 0] < .45))
+                             candidate_score=scorer)
+    assert result is None  # New recovery observations require confirmation.
+    result = detector.detect(np.zeros((640, 640, 3), dtype=np.uint8),
+                             candidate_score=scorer)
     np.testing.assert_array_equal(result, recovered)
-    assert calls == [True, False]
-    assert detector.diagnostics()['recovery_attempted']
+    assert calls == [True, False, True, False]
+
+
+def test_recovery_confirmation_allows_whole_hand_motion(monkeypatch):
+    detector = simulated_detector()
+    initial = representative_hand()
+    positions = iter([initial, initial + [.08, .03], initial + [.15, .06]])
+    monkeypatch.setattr(detector, '_run_view', lambda rgb, view, *, video: (.1, next(positions), None))
+    detector._shape = (640, 640)
+    detector._recovery_tracking = True
+    blank = np.zeros((640, 640, 3), dtype=np.uint8)
+    assert detector.detect(blank) is None
+    assert detector.detect(blank) is not None
+    np.testing.assert_allclose(normalized_hand_shape(initial), normalized_hand_shape(initial + [.15, .06]), atol=1e-5)
 
 
 def test_recovery_is_skipped_when_first_pass_uses_its_time_allowance(monkeypatch):
@@ -77,3 +95,41 @@ def test_recovery_is_skipped_when_first_pass_uses_its_time_allowance(monkeypatch
     monkeypatch.setattr(detector, '_run_view', run)
     assert detector.detect(np.zeros((640, 640, 3), dtype=np.uint8)) is None
     assert calls == [True]
+
+
+def test_transient_miss_retries_last_successful_rotation_first(monkeypatch):
+    detector = simulated_detector()
+    detector._shape = (480, 640)
+    detector._view = (0, 0, 640, 480, 3, 0)
+    calls = []
+    recovered = representative_hand()
+
+    def run(_rgb, view, *, video):
+        calls.append((view, video))
+        return None if video else (.1, recovered, None)
+
+    monkeypatch.setattr(detector, '_run_view', run)
+    assert detector.detect(np.zeros((480, 640, 3), dtype=np.uint8)) is None
+    assert calls == [
+        ((0, 0, 640, 480, 3, 0), True),
+        ((0, 0, 640, 480, 3, 1), False),
+    ]
+    assert detector.diagnostics()['rejection_reason'] == 'confirming_recovered_hand'
+
+
+def test_recovery_matching_last_accepted_hand_resumes_without_confirmation_gap(monkeypatch):
+    detector = simulated_detector()
+    hand = representative_hand()
+    blank = np.zeros((480, 640, 3), dtype=np.uint8)
+    calls = iter([
+        (.1, hand, None),
+        None,
+        (.1, hand + [.03, -.02], None),
+    ])
+    monkeypatch.setattr(detector, '_run_view', lambda *_args, **_kwargs: next(calls))
+
+    assert detector.detect(blank) is not None
+    recovered = detector.detect(blank)
+
+    assert recovered is not None
+    assert detector.diagnostics()['rejection_reason'] is None

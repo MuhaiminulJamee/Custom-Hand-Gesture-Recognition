@@ -328,14 +328,13 @@ class GeometryResolver:
             and float(ordered[-1]) >= self.config.confidence_floor
             and float(ordered[-1] - ordered[-2]) >= self.config.probability_margin_floor
         )
-        supported_pose = bool(
-            gesture in {"left", "right"}
-            and model_agrees
-            and finger_extension_score(points, 5, 6, 7, 8) >= 0.45
-            and index_straightness >= 0.80
-            and index_lead >= 0.20
-        )
-        directional = bool(dominance >= 0.78 and (strict_pose or supported_pose))
+        # Folded OTHER fingers supplied half the old pose score, so a folded
+        # index could pass. Require extension and prominence of the index itself.
+        index_extension = finger_extension_score(points, 5, 6, 7, 8)
+        index_only = bool(index_extension >= .45 and index_straightness >= .70 and index_lead >= .04)
+        supported_pose = bool(model_agrees and index_extension >= .45
+                              and index_straightness >= .80 and index_lead >= .20)
+        directional = bool(dominance >= 0.78 and index_only and (strict_pose or supported_pose))
         details = {
             "valid": directional if raw in {"left", "right", "up", "down"} else True,
             "gesture": gesture,
@@ -345,6 +344,11 @@ class GeometryResolver:
             "mean_non_index_extension": float(non_index_extensions.mean()),
             "index_straightness": index_straightness,
             "index_lead_ratio": index_lead,
+            "index_extension": index_extension,
+            "index_only": index_only,
+            "strong_geometry": bool(directional and model_agrees and float(ordered[-1]) >= .95
+                                    and index_extension >= .85 and index_straightness >= .92
+                                    and index_lead >= .30 and dominance >= .86),
             "model_supported_pose": supported_pose,
             "horizontal_mirror": False,
             "horizontal_semantic_swap": True,
@@ -449,6 +453,10 @@ class GeometryResolver:
             "extended_non_thumb_count": extended_non_thumb_count,
             "dorsal_score": float(dorsal["score"]),
             "dorsal_geometry_supported": dorsal_supported,
+            "palm_geometry_supported": bool(raw == "open_palm" and open_palm_valid
+                and float(probabilities[self.config.class_to_idx["open_palm"]]) >= .95
+                and float(non_thumb.min()) >= .70 and float(non_thumb.mean()) >= .90
+                and extensions[0] >= .60),
             "downward_finger_count": int(dorsal["downward_finger_count"]),
         }
 
@@ -468,6 +476,9 @@ class GeometryResolver:
                 "valid": valid,
                 "reason": reason,
                 "gesture": resolved,
-                "geometry_supported": bool(resolved == "dorsal" and shape.get("dorsal_geometry_supported", False)),
+                "geometry_supported": bool(
+                    (resolved == "dorsal" and shape.get("dorsal_geometry_supported", False))
+                    or (resolved == "open_palm" and shape.get("palm_geometry_supported", False))
+                    or (resolved in {"left", "right", "up", "down"} and directional.get("strong_geometry", False))),
             },
         }

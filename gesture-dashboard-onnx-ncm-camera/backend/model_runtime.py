@@ -81,7 +81,7 @@ class RuntimeSession:
             self.diagnostic_gates[model_name] = TemporalGate(self.config)
         return self.diagnostic_gates[model_name]
 
-    def observe_action_release(self, gesture: str | None) -> bool:
+    def observe_action_release(self, gesture: str | None, *, tracking_gap: bool = False) -> bool:
         """Re-arm a latched toggle only after a sustained gesture release."""
         if self.last_action_gesture is None:
             self._action_release_frames = 0
@@ -91,6 +91,10 @@ class RuntimeSession:
             return False
         self._action_release_frames += 1
         required = max(1, int(self.config.release_frames_required))
+        if tracking_gap:
+            # Brief low-resolution detector dropouts must not re-trigger a held
+            # toggle when the same hand returns. No action is emitted in gaps.
+            required = max(required, int(np.ceil(self.config.target_fps * .6)))
         if self._action_release_frames < required:
             return False
         self.last_action_gesture = None
@@ -813,7 +817,7 @@ class InferenceEngine:
         session.temporal_gate.reset()
         session.diagnostic_gates.clear()
         reject_label = getattr(self.config, "reject_label", "no_gesture")
-        session.observe_action_release(None)
+        session.observe_action_release(None, tracking_gap=True)
         follow = session.follow_object.observe(
             reject_label,
             stable=False,
@@ -924,23 +928,17 @@ class InferenceEngine:
 
         with self._lock:
             landmark_started = time.perf_counter()
+            # Track the observed hand even if the gesture classifier rejects it.
+            # Searching for a high classifier score on every rejected frame can
+            # replace a real palm with a hallucinated hand on the background.
             def candidate_score(points):
+                # Use a pose contradiction to recover drifted finger identities.
+                # Low vocabulary mass alone must NOT restart a real hand track.
                 try:
-                    probabilities, _, _, quality = self.model_manager.predict_detailed(
+                    probabilities, _, _, _ = self.model_manager.predict_detailed(
                         landmarks_to_feature(points), model_name)
-                    resolved, details = self.resolver.resolve(probabilities, points)
-                    pose = details.get("pose_validation") or {}
-                    mass = float(quality.get("known_gesture_mass", 1.0))
-                    ordered = np.sort(resolved)
-                    valid = bool(pose.get("valid", True))
-                    supported = bool(pose.get("geometry_supported", False)) and float(
-                        (quality.get("online_adapter") or {}).get("negative_support", 0)) <= 0
-                    if valid and (mass >= self.config.known_mass_floor or supported) and (
-                        ordered[-1] >= self.config.confidence_floor
-                        and ordered[-1] - ordered[-2] >= self.config.probability_margin_floor
-                    ):
-                        return 1.0
-                    return mass * 0.5 if valid else 0.0
+                    _, details = self.resolver.resolve(probabilities, points)
+                    return 1.0 if details["pose_validation"]["valid"] else 0.0
                 except ValueError:
                     return -0.5
             raw_landmarks = (self.detector.detect(rgb, candidate_score=candidate_score)
@@ -1012,11 +1010,17 @@ class InferenceEngine:
         resolved_probabilities = resolved_rows[selected_name]
         resolver_details = resolver_rows[selected_name]
         pose_validation = resolver_details.get("pose_validation") or {}
-        if hasattr(self.detector, "request_pose_recovery") and (
-            not pose_validation.get("valid", True)
-            or (float(selected_quality.get("known_gesture_mass", 1.0)) < self.config.known_mass_floor
-                and not pose_validation.get("geometry_supported", False))
-        ):
+        direction_details = resolver_details.get("directional") or {}
+        negative_support = float(
+            (selected_quality.get("online_adapter") or {}).get("negative_support", 0)
+        )
+        geometry_supported = bool(pose_validation.get("geometry_supported", False)) and negative_support <= 0
+        directional_recovery = bool(
+            geometry_supported
+            and direction_details.get("strong_geometry", False)
+            and direction_details.get("model_supported_pose", False)
+        )
+        if not pose_validation.get("valid", True) and hasattr(self.detector, "request_pose_recovery"):
             self.detector.request_pose_recovery()
         decision = session.temporal_gate.update(
             resolved_probabilities,
@@ -1028,13 +1032,18 @@ class InferenceEngine:
             rejection_reason=str(
                 pose_validation.get("reason", "pose geometry rejected")
             ),
-            geometry_supported=bool(pose_validation.get("geometry_supported", False))
-            and float((selected_quality.get("online_adapter") or {}).get("negative_support", 0)) <= 0,
+            geometry_supported=geometry_supported,
+            directional_recovery=directional_recovery,
         )
 
         diagnostic_results: dict[str, dict[str, Any]] = {}
         for name, (probabilities, elapsed_ms, model_quality) in model_rows.items():
             model_pose = resolver_rows[name].get("pose_validation") or {}
+            model_direction = resolver_rows[name].get("directional") or {}
+            model_negative_support = float(
+                (model_quality.get("online_adapter") or {}).get("negative_support", 0)
+            )
+            model_geometry_supported = bool(model_pose.get("geometry_supported", False)) and model_negative_support <= 0
             model_decision = (
                 decision if name == selected_name
                 else session.diagnostic_gate(name).update(
@@ -1047,8 +1056,12 @@ class InferenceEngine:
                     rejection_reason=str(
                         model_pose.get("reason", "pose geometry rejected")
                     ),
-                    geometry_supported=bool(model_pose.get("geometry_supported", False))
-                    and float((model_quality.get("online_adapter") or {}).get("negative_support", 0)) <= 0,
+                    geometry_supported=model_geometry_supported,
+                    directional_recovery=bool(
+                        model_geometry_supported
+                        and model_direction.get("strong_geometry", False)
+                        and model_direction.get("model_supported_pose", False)
+                    ),
                 )
             )
             diagnostic_results[name] = {
@@ -1143,6 +1156,8 @@ class InferenceEngine:
             "diagnostics": diagnostic_results,
             "resolvers": resolver_details,
             "landmarks": landmarks.round(6).tolist(),
+            "display_landmarks": (landmarks.round(6).tolist()
+                                  if decision.predicted_gesture != self.config.reject_label else []),
             "feature_vector": feature.round(7).tolist(),
             "actual_fps": actual_fps,
             "quality": self._quality_payload(

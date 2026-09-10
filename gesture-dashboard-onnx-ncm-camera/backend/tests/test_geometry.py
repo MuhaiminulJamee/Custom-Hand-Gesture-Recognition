@@ -39,14 +39,10 @@ def test_ncm_horizontal_semantics_are_swapped_without_mirroring(monkeypatch):
     resolver = GeometryResolver(config)
     probabilities = np.zeros(len(config.class_names), dtype=np.float64)
     probabilities[config.class_to_idx["left"]] = 1.0
-    monkeypatch.setattr(geometry, "single_index_pose_score", lambda _points: 1.0)
-    monkeypatch.setattr(geometry, "finger_extension_score", lambda *_args: 0.0)
-
-    points = np.zeros((21, 2), dtype=np.float32)
-    points[5] = [0.4, 0.5]
-    points[8] = [0.8, 0.5]
+    from backend.tests.test_multiview_training import directional_points
+    points = directional_points("left")
     positive, positive_details = resolver._directional(probabilities, points)
-    points[8] = [0.1, 0.5]
+    points = directional_points("right")
     negative, negative_details = resolver._directional(probabilities, points)
 
     assert config.class_names[int(np.argmax(positive))] == "left"
@@ -153,4 +149,33 @@ def test_geometry_support_never_bypasses_invalid_pose_or_other_class_rejection()
     gate = TemporalGate(RuntimeConfig())
     assert not gate.update(np.eye(8)[0], known_gesture_mass=.01, geometry_supported=True).execute
     decision = gate.update(np.eye(8)[6], known_gesture_mass=.01, geometry_supported=True, pose_valid=False)
+    assert decision.predicted_gesture == 'no_gesture'
+
+
+@pytest.mark.parametrize('gesture', ['left', 'right', 'up', 'down'])
+def test_strong_direction_geometry_recovers_camera_angle_mass_miss(gesture):
+    config = RuntimeConfig()
+    gate = TemporalGate(config)
+    row = np.eye(8)[config.class_to_idx[gesture]]
+    for now in (1.0, 1.1, 1.2, 1.3):
+        decision = gate.update(row, now=now, known_gesture_mass=.01,
+                               pose_valid=True, geometry_supported=True,
+                               directional_recovery=True)
+        assert not decision.execute
+    decision = gate.update(row, now=1.41, known_gesture_mass=.01,
+                           pose_valid=True, geometry_supported=True,
+                           directional_recovery=True)
+    assert decision.execute
+    assert decision.predicted_gesture == gesture
+    assert decision.reason == 'stable directional geometry'
+
+
+def test_geometry_flag_cannot_recover_low_mass_non_directional_pose():
+    config = RuntimeConfig()
+    gate = TemporalGate(config)
+    row = np.eye(8)[config.class_to_idx['like']]
+    for now in (1.0, 1.1, 1.2, 1.3, 1.4):
+        decision = gate.update(row, now=now, known_gesture_mass=.01,
+                               pose_valid=True, geometry_supported=True)
+    assert not decision.execute
     assert decision.predicted_gesture == 'no_gesture'

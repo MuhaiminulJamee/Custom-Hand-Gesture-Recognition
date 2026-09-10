@@ -174,6 +174,7 @@ class TemporalGate:
         pose_valid: bool = True,
         rejection_reason: str | None = None,
         geometry_supported: bool = False,
+        directional_recovery: bool = False,
     ) -> TemporalDecision:
         now = time.monotonic() if now is None else float(now)
         row = np.asarray(probabilities, dtype=np.float64).reshape(-1)
@@ -198,8 +199,19 @@ class TemporalGate:
                 probabilities=row,
                 known_gesture_mass=known_gesture_mass,
             )
-        dorsal_fallback = bool(geometry_supported and self.config.class_names[int(row.argmax())] == "dorsal")
-        if known_gesture_mass < self.config.known_mass_floor and not dorsal_fallback:
+        geometry_gesture = self.config.class_names[int(row.argmax())]
+        dorsal_fallback = bool(geometry_supported and geometry_gesture == "dorsal")
+        directional_fallback = bool(
+            directional_recovery and geometry_supported
+            and geometry_gesture in {"left", "right", "up", "down"}
+        )
+        supported_hand = bool(
+            geometry_supported and known_gesture_mass >= .50
+            and geometry_gesture == "open_palm"
+        )
+        if known_gesture_mass < self.config.known_mass_floor and not (
+            dorsal_fallback or directional_fallback or supported_hand
+        ):
             return self.reject(
                 "outside the eight-gesture vocabulary",
                 probabilities=row,
@@ -246,6 +258,10 @@ class TemporalGate:
         required_hold = self.config.minimum_hold_seconds
         if dorsal_fallback and known_gesture_mass < self.config.known_mass_floor:
             required_hold = max(required_hold, 0.35)
+        if directional_fallback and known_gesture_mass < self.config.known_mass_floor:
+            required_hold = max(required_hold, 0.40)
+        if supported_hand and known_gesture_mass < self.config.known_mass_floor:
+            required_hold = max(required_hold, 0.40)
         execute = bool(
             confidence >= self.config.confidence_floor
             and stable_frames >= self.config.stable_frames_required
@@ -258,7 +274,13 @@ class TemporalGate:
         elif held_seconds < required_hold:
             reason = "gesture hold requirement not reached"
         else:
-            reason = "stable Dorsal geometry" if dorsal_fallback and known_gesture_mass < self.config.known_mass_floor else "stable and confident"
+            reason = (
+                "stable Dorsal geometry"
+                if dorsal_fallback and known_gesture_mass < self.config.known_mass_floor
+                else "stable directional geometry"
+                if directional_fallback and known_gesture_mass < self.config.known_mass_floor
+                else "stable and confident"
+            )
         return TemporalDecision(
             execute=execute,
             predicted_gesture=gesture,

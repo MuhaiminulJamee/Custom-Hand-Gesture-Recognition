@@ -2,6 +2,15 @@
 
 Current release: **v18_20**. See [V18_20_README.md](V18_20_README.md) for current training data, notebook, metrics, and limitations. Prior-release statistics below are historical.
 
+Start with **05 Data Collection** in the dashboard to collect participant images
+under `D:\Data-Collection`. See [DATA_COLLECTION.md](DATA_COLLECTION.md) for the
+guided capture workflow, storage layout, recognition changes and limitations.
+
+For the real-camera, multi-angle directional data workflow requested after
+v18_20, see [MULTIVIEW_TRAINING.md](MULTIVIEW_TRAINING.md). It provides guided
+NCM/webcam capture, participant-isolated splits, candidate training, and
+qualification without automatically replacing the production model.
+
 The camera runtime now preserves native hand detail, reacquires side-view poses,
 and includes a calibrated distance/range-test panel with CSV export. See
 [HAND_DISTANCE.md](HAND_DISTANCE.md) for the measurement procedure and the exact

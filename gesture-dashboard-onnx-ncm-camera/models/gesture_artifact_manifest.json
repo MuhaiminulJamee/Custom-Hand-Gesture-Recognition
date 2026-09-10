@@ -1,5 +1,9 @@
 {
   "artifacts": {
+    "blaze_face_short_range.tflite": {
+      "bytes": 229746,
+      "sha256": "b4578f35940bf5a1a655214a1cce5cab13eba73c1297cd78e1a04c2380b0152f"
+    },
     "eight_gesture_classification_report.csv": {
       "bytes": 520,
       "sha256": "6f96f1a65423da210e79f1d428cfab11ae40d74a2be62c021418ee8570f9a79c"
@@ -25,8 +29,8 @@
       "sha256": "1aec12c072aa86e5f72de405ffba9f0914eb0a7939a19fcb069152b46931fc95"
     },
     "gesture_mobile_runtime_config.json": {
-      "bytes": 7498,
-      "sha256": "9a5f2c0c91e7ab37385533b2ab94eac69a5ecba075908e865eadba70210737d4"
+      "bytes": 7709,
+      "sha256": "27fccc24eb4a718cd26f0bc34c773a61ef2f3dd350ca14b20938022fa9f230d4"
     },
     "gesture_online_replay_cache.npz": {
       "bytes": 504860,
@@ -55,8 +59,8 @@
     "dorsal",
     "ok"
   ],
-  "created_utc": "2026-09-05T10:40:44.204146+00:00",
+  "created_utc": "2026-09-10T05:56:51.250883+00:00",
   "feature_count": 76,
-  "release_fingerprint": "683fa78a36a13c6bb85ad3bb1dc7845bfd8c5ec5ee0ecab7794234e44a1f3012",
+  "release_fingerprint": "51bda214478924291aaf77bba1eaad5bed5e587ce38ab5bcaebca9859d499602",
   "schema_version": 1
 }

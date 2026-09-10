@@ -46,6 +46,8 @@ next-env.d.ts
 *.pyc
 /.runtime/
 /data/v18_20/*.zip
+/data/multiview/
+/artifacts/multiview/
 /v18_20_bundle.zip
 /gesture-distance-tests.csv
 
@@ -66,6 +68,7 @@ next-env.d.ts
 !/models/gesture_mobile_runtime_config.json
 !/models/gesture_artifact_manifest.json
 !/models/hand_landmarker.task
+!/models/blaze_face_short_range.tflite
 !/models/eight_gesture_classification_report.csv
 !/models/eight_gesture_confusion_matrix.csv
 !/models/eight_gesture_hard_case_metrics.csv

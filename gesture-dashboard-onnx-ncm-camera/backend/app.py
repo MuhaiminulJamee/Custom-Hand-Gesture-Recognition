@@ -37,6 +37,7 @@ from .observability import RuntimeMetrics, configure_logging
 from .online_learning import OnlineLearningService
 from .runtime import InferenceStartLimiter
 from .storage import FeedbackRecord, FeedbackStore, artifact_status, load_metric_files
+from .data_collection import CollectionStore
 
 
 ALLOWED_ORIGINS = {
@@ -113,6 +114,7 @@ inference_start_limiter = InferenceStartLimiter(runtime_config.frame_interval_ms
 ncm_camera = NcmCameraClient(NcmCameraConfig.from_environment())
 action_history: deque[dict[str, Any]] = deque(maxlen=500)
 active_sessions: dict[str, RuntimeSession] = {}
+collection_store = CollectionStore()
 
 
 async def _process_frame_with_limit(
@@ -468,6 +470,90 @@ def feedback_summary() -> dict[str, Any]:
     return feedback_store.summary()
 
 
+class CollectionParticipantPayload(BaseModel):
+    participant_id: str = Field(min_length=1, max_length=48)
+
+
+class CollectionSamplePayload(CollectionParticipantPayload):
+    token: str = Field(min_length=32, max_length=32)
+    session_id: str = Field(min_length=1, max_length=48)
+    step_id: str = Field(max_length=80)
+    handedness: Literal["left", "right", "none", "unspecified"] = "unspecified"
+    finger_orientation: Literal["toward_camera", "away_from_camera", "none", "unspecified"] = "unspecified"
+    lighting: Literal["normal", "dim", "backlit"] = "normal"
+    distance: Literal["near", "medium", "far"] = "medium"
+    note: str = Field(default="", max_length=500)
+
+
+class CollectionDeleteSelectedPayload(CollectionParticipantPayload):
+    sample_refs: list[str] = Field(min_length=1, max_length=100)
+
+
+def _collection_call(request: Request, method, **kwargs):
+    origin = request.headers.get("origin")
+    if origin and origin not in ALLOWED_ORIGINS:
+        raise HTTPException(status_code=403, detail="Origin is not allowed.")
+    try:
+        return method(**kwargs)
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except OSError as error:
+        raise HTTPException(status_code=503, detail=f"Collection storage unavailable: {error}") from error
+
+
+@app.get("/api/collection")
+def collection_summary(request: Request, participant_id: str | None = None):
+    return _collection_call(request, collection_store.summary, participant_id=participant_id)
+
+
+@app.post("/api/collection/participants")
+def collection_participant(request: Request, payload: CollectionParticipantPayload):
+    return _collection_call(request, collection_store.add_participant, **payload.model_dump())
+
+
+@app.post("/api/collection/preview")
+def collection_preview(request: Request):
+    if not ncm_camera.status()["connected"]:
+        raise HTTPException(status_code=409, detail="Connect the board camera before capturing.")
+    return _collection_call(request, collection_store.freeze)
+
+
+@app.post("/api/collection/samples")
+def collection_sample(request: Request, payload: CollectionSamplePayload):
+    return _collection_call(request, collection_store.save, **payload.model_dump())
+
+
+@app.get("/api/collection/samples")
+def collection_samples(request: Request, participant_id: str, step_id: str | None = None):
+    return _collection_call(
+        request,
+        collection_store.list_samples,
+        participant_id=participant_id,
+        step_id=step_id,
+    )
+
+
+@app.get("/api/collection/image")
+def collection_image(request: Request, participant_id: str, sample_ref: str):
+    image = _collection_call(
+        request,
+        collection_store.sample_image,
+        participant_id=participant_id,
+        sample_ref=sample_ref,
+    )
+    return Response(content=image, media_type="image/jpeg")
+
+
+@app.post("/api/collection/samples/delete-selected")
+def collection_delete_selected(request: Request, payload: CollectionDeleteSelectedPayload):
+    return _collection_call(request, collection_store.delete_selected, **payload.model_dump())
+
+
+@app.post("/api/collection/samples/delete-last")
+def collection_delete_last(request: Request, payload: CollectionParticipantPayload):
+    return _collection_call(request, collection_store.delete_last, **payload.model_dump())
+
+
 @app.post("/api/feedback")
 def save_feedback(payload: FeedbackPayload) -> dict[str, Any]:
     try:
@@ -729,6 +815,7 @@ async def ncm_live_socket(websocket: WebSocket) -> None:
             result["camera_fps"] = camera_status["camera_fps"]
             result["ncm_camera"] = camera_status
             result["ncm_frame_id"] = frame_id
+            collection_store.observe(frame_id, frame, result)
             runtime_metrics.record_frame(result)
             if result.get("runtime_action") not in {None, "Wait / No Action"}:
                 action_history.append({

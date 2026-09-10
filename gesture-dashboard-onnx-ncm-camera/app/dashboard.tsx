@@ -5,6 +5,7 @@
 
 import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import RangeDiagnostics, { type RangePrediction } from './range-diagnostics';
+import DataCollection from './data-collection';
 
 const API_URL = process.env.NEXT_PUBLIC_GESTURE_API_URL ?? 'http://127.0.0.1:8200';
 const WS_URL = API_URL.replace(/^http/, 'ws');
@@ -198,6 +199,7 @@ type Prediction = RangePrediction & {
   base_probabilities?: Record<string, number>;
   feature_vector?: number[];
   landmarks?: number[][];
+  display_landmarks?: number[][];
   actual_fps?: number;
   camera_fps?: number;
   ncm_camera?: NcmStatus;
@@ -240,7 +242,7 @@ function milliseconds(value?: number) { return value == null ? '—' : `${value.
 function fps(value?: number | null) { return value == null || !Number.isFinite(value) ? '—' : value.toFixed(2); }
 
 export default function Dashboard() {
-  const [activeTab, setActiveTab] = useState<'live' | 'analytics' | 'feedback' | 'setup'>('live');
+  const [activeTab, setActiveTab] = useState<'live' | 'analytics' | 'feedback' | 'setup' | 'data_collection'>('live');
   const [health, setHealth] = useState<Health | null>(null);
   const [metrics, setMetrics] = useState<MetricResponse>({ files: [], rows: {} });
   const [actions, setActions] = useState<ActionEvent[]>([]);
@@ -420,7 +422,7 @@ export default function Dashboard() {
     drawLandmarksOnCanvas(feedbackLandmarkCanvasRef.current, landmarks);
   }, [drawLandmarksOnCanvas]);
 
-  useEffect(() => { drawLandmarks(prediction.landmarks); }, [prediction.landmarks, activeTab, drawLandmarks]);
+  useEffect(() => { drawLandmarks(prediction.display_landmarks ?? prediction.landmarks); }, [prediction.display_landmarks, prediction.landmarks, activeTab, drawLandmarks]);
 
   const stopCamera = (preservePrediction = false) => {
     cameraStartPendingRef.current = false;
@@ -959,7 +961,7 @@ export default function Dashboard() {
       </header>
 
       <nav className="nav-rail" aria-label="Dashboard sections">
-        {(['live', 'analytics', 'feedback', 'setup'] as const).map((tab, index) => (
+        {(['live', 'analytics', 'feedback', 'setup', 'data_collection'] as const).map((tab, index) => (
           <button className={`nav-item ${activeTab === tab ? 'active' : ''}`} type="button" key={tab} onClick={() => setActiveTab(tab)}>
             <span>0{index + 1}</span>{humanize(tab)}
           </button>
@@ -972,6 +974,7 @@ export default function Dashboard() {
       </nav>
 
       <section className="workspace">
+        <DataCollection api={API_URL} active={activeTab === 'data_collection'} connected={cameraActive && Boolean(ncmStatus?.connected)} ready={serverReady} streamRevision={streamRevision} toggleCamera={toggleCamera} />
         <div hidden={activeTab !== 'live' && activeTab !== 'feedback'}><RangeDiagnostics prediction={prediction} connected={cameraActive} /></div>
         {activeTab === 'live' && <>
           <div className="section-heading">
@@ -1136,7 +1139,7 @@ export default function Dashboard() {
             </aside>
 
             <article className="probability-card panel">
-              <div className="panel-header"><div>CLASS PROBABILITIES</div><span>EMA · ALL {classNames.length} CLASSES</span></div>
+              <div className="panel-header"><div>CLASS SCORES</div><span>{prediction.runtime_prediction === 'no_gesture' ? 'CANDIDATE ONLY · NO COMMAND ACCEPTED' : `EMA · ALL ${classNames.length} CLASSES`}</span></div>
               <div className="probability-list full-list">
                 {probabilityRows.map(({ name, value }) => <div className="probability-row" key={name}>
                   <span>{humanize(name)}</span><div><i style={{ width: `${Math.min(100, value * 100)}%` }} /></div><strong>{percent(value)}</strong>

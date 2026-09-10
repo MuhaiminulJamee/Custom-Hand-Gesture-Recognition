@@ -108,6 +108,8 @@ if (-not (Test-Path -LiteralPath (Join-Path $ProjectDirectory "models\hand_landm
 
 Push-Location $ProjectDirectory
 try {
+    & $PythonExecutable (Join-Path $PSScriptRoot "download_face_detector.py")
+    if ($LASTEXITCODE -ne 0) { throw "Could not install the face guard model." }
     $env:CI = "true"
     $PnpmCommand = Get-Command pnpm -ErrorAction SilentlyContinue
     if ($null -ne $PnpmCommand) {

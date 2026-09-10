@@ -14,6 +14,7 @@ MANIFEST_NAME = "gesture_artifact_manifest.json"
 MANIFEST_SCHEMA_VERSION = 1
 RUNTIME_PATTERNS = (
     "hand_landmarker.task",
+    "blaze_face_short_range.tflite",
     "gesture_mobile_runtime_config.json",
     "gesture_mlp_production.onnx",
     "gesture_mlp_onnx_metadata.json",

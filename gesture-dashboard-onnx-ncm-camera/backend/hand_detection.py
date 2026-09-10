@@ -6,14 +6,17 @@ import time
 from pathlib import Path
 
 import numpy as np
+from .face_guard import FaceGuard, overlaps_face_as_small_hand
 
 DETECTOR_SETTINGS = {
     "running_mode": "VIDEO with IMAGE recovery",
     "minimum_detection_confidence": 0.55,
     "minimum_presence_confidence": 0.55,
     "minimum_tracking_confidence": 0.60,
-    "recovery_detection_confidence": 0.30,
-    "recovery_presence_confidence": 0.40,
+    "recovery_detection_confidence": 0.20,
+    "recovery_presence_confidence": 0.30,
+    "face_guard": "BlazeFace small-hand overlap exclusion",
+    "recovery_confirmation_frames": 2,
     "minimum_palm_pixels": 8,
     "minimum_hand_span_pixels": 24,
     "minimum_hand_short_side_pixels": 10,
@@ -50,6 +53,17 @@ def hand_pixel_metrics(points, image_shape):
     }
 
 
+def normalized_hand_shape(points):
+    """Remove whole-hand motion and scale before comparing recovered tracks."""
+    shape = np.asarray(points, dtype=np.float32).reshape(21, 2).copy()
+    palm_center = shape[[0, 5, 9, 13, 17]].mean(axis=0)
+    shape -= palm_center
+    scale = float(np.linalg.norm(shape[9] - shape[0]))
+    if scale < 1e-6:
+        scale = float(np.linalg.norm(np.ptp(shape, axis=0)))
+    return shape / max(scale, 1e-6)
+
+
 class HandDetector:
     def __init__(self, model_path: Path):
         self.ready = False
@@ -65,6 +79,11 @@ class HandDetector:
         self._recovery_tracking = False
         self._pose_recovery_requested = False
         self._unqualified_frames = 0
+        self._pending_recovery = None
+        self._pending_recovery_count = 0
+        self._accepted_points = None
+        self._accepted_view = None
+        self._face_guard = None
         if not model_path.exists():
             self.error = f"Missing MediaPipe hand model: {model_path.name}"
             return
@@ -80,9 +99,11 @@ class HandDetector:
                     running_mode=mp.tasks.vision.RunningMode.VIDEO))
             self._recovery = mp.tasks.vision.HandLandmarker.create_from_options(
                 mp.tasks.vision.HandLandmarkerOptions(
-                    **common, min_hand_detection_confidence=0.30, min_hand_presence_confidence=0.40,
+                    **common, min_hand_detection_confidence=0.20, min_hand_presence_confidence=0.30,
                     running_mode=mp.tasks.vision.RunningMode.IMAGE))
             self.ready = True
+            if model_path.with_name("blaze_face_short_range.tflite").exists():
+                self._face_guard = FaceGuard(model_path.with_name("blaze_face_short_range.tflite"))
         except Exception as error:
             self.error = f"MediaPipe initialization failed: {error}"
             self.close()
@@ -123,7 +144,7 @@ class HandDetector:
     def _search_views(self, shape):
         height, width = shape[:2]
         views = [(0, 0, width, height, turn, enhance)
-                 for turn, enhance in ((3, 1), (3, 0), (1, 1), (1, 0), (2, 0), (0, 1))]
+                 for turn, enhance in ((3, 0), (3, 1), (1, 0), (1, 1), (2, 0), (0, 1))]
         side = max(32, int(min(width, height) * 0.60))
         # Search only one alternative per frame; cycle overlapping regions.
         for turn in (0, 3, 1):
@@ -143,9 +164,15 @@ class HandDetector:
             self._recovery_tracking = False
             self._pose_recovery_requested = False
             self._unqualified_frames = 0
+            self._pending_recovery = None
+            self._pending_recovery_count = 0
+            self._accepted_points = None
+            self._accepted_view = None
         full = (0, 0, width, height, 0, 0)
         view = self._view or full
-        reacquired = self._pose_recovery_requested
+        # A classifier veto is not evidence that the tracking coordinates jumped.
+        # Reset smoothing only when a different image view actually replaces it.
+        reacquired = False
         if self._pose_recovery_requested:
             self._recovery_tracking = True
             self._pose_recovery_requested = False
@@ -153,7 +180,14 @@ class HandDetector:
                                   "analysis_width": width, "analysis_height": height,
                                   "reacquired": reacquired,
                                   "recovery_attempted": False, "rejection_reason": None}
+        face_guard = getattr(self, "_face_guard", None)
+        boxes = face_guard.detect(rgb_image) if face_guard else []
+        self._last_diagnostics["face_guard_ready"] = bool(face_guard and face_guard.detector)
+        self._last_diagnostics["face_count"] = len(boxes)
         selected = self._run_view(rgb_image, view, video=not self._recovery_tracking)
+        if selected is not None and overlaps_face_as_small_hand(selected[1], rgb_image.shape, boxes):
+            selected = None
+            self._last_diagnostics["rejection_reason"] = "hand_candidate_overlaps_face"
         def score(row):
             if row is None:
                 return -1.0
@@ -166,13 +200,19 @@ class HandDetector:
             self._last_diagnostics["running_mode"] = "IMAGE_RECOVERY"
         if selected_score < 1.0 and (time.perf_counter() - started) < .055:
             views = self._search_views(rgb_image.shape)
-            if self._recovery_tracking and self._unqualified_frames == 0:
+            if self._view is not None and self._unqualified_frames < 2:
+                # Retry the last view first. Side-pointing hands are often
+                # visible only after a 90-degree detector rotation; abandoning
+                # that view after one intermittent miss made the search cycle
+                # through unrelated rotations for several seconds.
                 recovery_view = (*view[:5], 1 - view[5])
             else:
                 recovery_view = views[self._search_index % len(views)]
                 self._search_index += 1
             self._last_diagnostics["recovery_attempted"] = True
             alternative = self._run_view(rgb_image, recovery_view, video=False)
+            if alternative is not None and overlaps_face_as_small_hand(alternative[1], rgb_image.shape, boxes):
+                alternative = None
             alternative_score = score(alternative)
             if alternative_score > selected_score:
                 selected, view, selected_score = alternative, recovery_view, alternative_score
@@ -180,12 +220,17 @@ class HandDetector:
                 # plausible but incorrect open hand. Keep redetecting the
                 # recovered view rather than inheriting that tracking state.
                 self._recovery_tracking = True
+                self._last_diagnostics["reacquired"] = view != (self._view or full)
         self._unqualified_frames = 0 if selected_score >= 1.0 else self._unqualified_frames + 1
         if selected is None:
+            self._pending_recovery = None
+            self._pending_recovery_count = 0
             self._misses += 1
             if self._misses >= 3:
                 self._view = None
                 self._recovery_tracking = False
+                self._accepted_points = None
+                self._accepted_view = None
             return None
         area, points, category = selected
         metrics = hand_pixel_metrics(points, rgb_image.shape)
@@ -205,9 +250,48 @@ class HandDetector:
             self._misses += 1
             if self._misses >= 3:
                 self._view = None
+                self._accepted_points = None
+                self._accepted_view = None
             return None
         self._misses = 0
         self._view = view
+        self._search_index = 0
+        if self._recovery_tracking or getattr(self, "_pending_recovery", None) is not None:
+            pending = getattr(self, "_pending_recovery", None)
+            same_accepted_view = (
+                getattr(self, "_accepted_points", None) is not None
+                and getattr(self, "_accepted_view", None) == tuple(view[:5])
+            )
+            previous = pending if pending is not None else (
+                self._accepted_points if same_accepted_view else None
+            )
+            # A genuine pointing hand may be moving across the scene. Compare
+            # hand shape rather than absolute screen coordinates so translation
+            # and moderate distance changes do not prevent reacquisition.
+            current_shape = normalized_hand_shape(points)
+            previous_shape = normalized_hand_shape(previous) if previous is not None else None
+            consistent = previous_shape is not None and float(
+                np.median(np.linalg.norm(current_shape - previous_shape, axis=1))
+            ) < .15
+            previous_count = getattr(self, "_pending_recovery_count", 0) if pending is not None else (
+                1 if same_accepted_view else 0
+            )
+            self._pending_recovery_count = previous_count + 1 if consistent else 1
+            self._pending_recovery = points.copy()
+            # Once IMAGE mode has found a qualified view, let VIDEO tracking
+            # verify that view on the next frame. Requiring three consecutive
+            # IMAGE detections made low-resolution side-pointing hands nearly
+            # impossible to reacquire because IMAGE detection is intermittent.
+            # The temporal command gate still requires stable observations.
+            self._recovery_tracking = False
+            if self._pending_recovery_count < 2:
+                self._last_diagnostics["rejection_reason"] = "confirming_recovered_hand"
+                return None
+            self._pending_recovery = None
+            self._pending_recovery_count = 0
+        else:
+            self._pending_recovery = None
+            self._pending_recovery_count = 0
         if metrics["palm_scale_px"] < 24 and metrics["hand_span_px"] < 90:
             pixels = points * [width, height]
             side = min(min(width, height), max(96, int(np.ptp(pixels, axis=0).max() * 2.6)))
@@ -215,6 +299,8 @@ class HandDetector:
             x = int(np.clip(center[0] - side / 2, 0, width - side))
             y = int(np.clip(center[1] - side / 2, 0, height - side))
             self._view = (x, y, side, side, view[4], view[5])
+        self._accepted_points = points.copy()
+        self._accepted_view = tuple(self._view[:5])
         return points
 
     def diagnostics(self):
@@ -226,6 +312,8 @@ class HandDetector:
         self._pose_recovery_requested = True
 
     def close(self):
+        if getattr(self, "_face_guard", None) is not None:
+            self._face_guard.close()
         for name in ("_landmarker", "_recovery"):
             model = getattr(self, name, None)
             if model is not None:
