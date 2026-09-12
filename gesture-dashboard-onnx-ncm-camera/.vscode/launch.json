@@ -1,0 +1,38 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Live Camera: PC Webcam",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/run_live_camera.py",
+      "args": ["--source", "webcam"],
+      "console": "integratedTerminal",
+      "env": {
+        "OPENBLAS_NUM_THREADS": "1"
+      }
+    },
+    {
+      "name": "Live Camera: USB-NCM Board",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/run_live_camera.py",
+      "args": ["--source", "ncm"],
+      "console": "integratedTerminal",
+      "env": {
+        "OPENBLAS_NUM_THREADS": "1"
+      }
+    },
+    {
+      "name": "Verify ONNX Model (Preflight)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/onnx_preflight.py",
+      "console": "integratedTerminal",
+      "env": {
+        "OPENBLAS_NUM_THREADS": "1"
+      }
+    }
+  ]
+}
+

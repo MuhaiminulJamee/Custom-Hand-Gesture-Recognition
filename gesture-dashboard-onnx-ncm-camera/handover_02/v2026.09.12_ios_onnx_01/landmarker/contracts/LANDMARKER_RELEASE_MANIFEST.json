@@ -1,0 +1,15 @@
+﻿{
+  "release_version": "v2026.09.12_ios_onnx_01",
+  "source_commit": "bcc7b60",
+  "date": "2026-09-12",
+  "package_type": "landmarker",
+  "files": [
+    "models/hand_landmarker.task",
+    "swift/GestureFeatureExtractor.swift"
+  ],
+  "notes": [
+    "hand_landmarker.task provides 21 landmarks",
+    "GestureFeatureExtractor.swift must be used to produce 76-D features",
+    "Feature input to ONNX: landmark_features, shape [1,76], float32"
+  ]
+}

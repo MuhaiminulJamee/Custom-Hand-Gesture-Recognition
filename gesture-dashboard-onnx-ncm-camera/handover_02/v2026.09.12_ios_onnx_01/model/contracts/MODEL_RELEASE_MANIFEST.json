@@ -1,0 +1,47 @@
+{
+  "release_version": "v2026.09.12_ios_onnx_01",
+  "source_commit": "bcc7b60",
+  "date": "2026-09-12",
+  "package_type": "model",
+  "files": [
+    "models/gesture_mlp_production.onnx",
+    "models/gesture_mlp_onnx_metadata.json",
+    "models/gesture_mobile_runtime_config.json",
+    "models/gesture_artifact_manifest.json"
+  ],
+  "contract": {
+    "runtime_output": "runtime_action",
+    "model_output_classes_8": [
+      "left",
+      "right",
+      "up",
+      "down",
+      "open_palm",
+      "like",
+      "dorsal",
+      "ok"
+    ],
+    "rejection_sentinel": "no_gesture",
+    "action_map": {
+      "left": "Move Left",
+      "right": "Move Right",
+      "up": "Move Up",
+      "down": "Move Down",
+      "open_palm": "Enable / Disable Object Tracking",
+      "like": "Play / Pause",
+      "dorsal": "Return to Default Position",
+      "ok": "Start / Stop Recording",
+      "no_gesture": "Wait / No Action"
+    },
+    "thresholds": {
+      "confidence_floor": 0.80,
+      "known_mass_floor": 0.95,
+      "stable_frames_required": 3,
+      "action_cooldown_seconds": 0.80
+    },
+    "direction_semantic_swap": {
+      "positive_index_dx_command": "left",
+      "negative_index_dx_command": "right"
+    }
+  }
+}

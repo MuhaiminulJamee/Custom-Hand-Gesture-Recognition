@@ -1,0 +1,66 @@
+{
+  "artifacts": {
+    "blaze_face_short_range.tflite": {
+      "bytes": 229746,
+      "sha256": "b4578f35940bf5a1a655214a1cce5cab13eba73c1297cd78e1a04c2380b0152f"
+    },
+    "eight_gesture_classification_report.csv": {
+      "bytes": 520,
+      "sha256": "6f96f1a65423da210e79f1d428cfab11ae40d74a2be62c021418ee8570f9a79c"
+    },
+    "eight_gesture_confusion_matrix.csv": {
+      "bytes": 248,
+      "sha256": "43e8d416f156e8653ac2ff3ce8711c7e9fc7a4e4c10b7dda4dd0b39f592ccaf8"
+    },
+    "eight_gesture_hard_case_metrics.csv": {
+      "bytes": 263,
+      "sha256": "2bf4a24db7a63db45be5bbe538f852330a42c6d7093c543b093ca4558aa54bc5"
+    },
+    "eight_gesture_test_metrics.csv": {
+      "bytes": 279,
+      "sha256": "7aeab0348a9eca5dc831b25bbbc36ce1dea33edf90cd7091a90f427d0984b2c2"
+    },
+    "gesture_mlp_onnx_metadata.json": {
+      "bytes": 6710,
+      "sha256": "fc0ca1bfd6f148da26d951612fae3842d16be8d6cf5ffe4e6680d9df819d489b"
+    },
+    "gesture_mlp_production.onnx": {
+      "bytes": 76452,
+      "sha256": "1aec12c072aa86e5f72de405ffba9f0914eb0a7939a19fcb069152b46931fc95"
+    },
+    "gesture_mobile_runtime_config.json": {
+      "bytes": 7709,
+      "sha256": "27fccc24eb4a718cd26f0bc34c773a61ef2f3dd350ca14b20938022fa9f230d4"
+    },
+    "gesture_online_replay_cache.npz": {
+      "bytes": 504860,
+      "sha256": "adb0f788e2330873b468574fa44c89a65ee047fd194372cd39f9e648cd8b4f69"
+    },
+    "gesture_online_untouched_test_cache.npz": {
+      "bytes": 1178888,
+      "sha256": "08db7978ad593b3f2e51232941fd3305dd0366ebed5713492481f893f0903664"
+    },
+    "gesture_online_validation_cache.npz": {
+      "bytes": 1151531,
+      "sha256": "bf7f3f8a59df52fd7fef407c10bd4d3f0d5f226437dde1acc832df354aabe6dc"
+    },
+    "hand_landmarker.task": {
+      "bytes": 7819105,
+      "sha256": "fbc2a30080c3c557093b5ddfc334698132eb341044ccee322ccf8bcf3607cde1"
+    }
+  },
+  "class_names": [
+    "left",
+    "right",
+    "up",
+    "down",
+    "open_palm",
+    "like",
+    "dorsal",
+    "ok"
+  ],
+  "created_utc": "2026-09-10T05:56:51.250883+00:00",
+  "feature_count": 76,
+  "release_fingerprint": "51bda214478924291aaf77bba1eaad5bed5e587ce38ab5bcaebca9859d499602",
+  "schema_version": 1
+}
