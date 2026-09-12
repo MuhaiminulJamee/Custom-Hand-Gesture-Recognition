@@ -1,0 +1,22 @@
+﻿{
+  "release_version": "v2026.09.10_ios_onnx_01",
+  "files": [
+    "models/gesture_mlp_production.onnx",
+    "models/gesture_mlp_onnx_metadata.json",
+    "models/gesture_mobile_runtime_config.json",
+    "models/gesture_artifact_manifest.json"
+  ],
+  "source_commit": "PASTE_GIT_COMMIT_HERE",
+  "date": "2026-09-10",
+  "consumption_contract": {
+    "payload_type": "prediction",
+    "field_to_use": "runtime_action",
+    "ignore": [
+      "demo command enums used only in dashboard UI"
+    ],
+    "supported_actions": [
+      "TOGGLE_PLAYBACK","STOP","MOVE_LEFT","MOVE_RIGHT","MOVE_UP","MOVE_DOWN","FOLLOW_OBJECT","WAIT_NO_ACTION","NO_ACTION"
+    ],
+    "supported_predictions": ["left","right","up","down","open_palm","like","dorsal","ok","no_gesture"]
+  }
+}
